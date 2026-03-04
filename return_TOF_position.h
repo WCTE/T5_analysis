@@ -47,19 +47,32 @@ namespace T5_CONFIG { // a namespace storing the parameters of the T5 detector
 		}
 }
 
+enum class HitQuality{
+	Perfect, // Hit is inside the scintillator bars
+	OutOfBounds, // Hit is outside the bounds, but within a 3-sigma error margin
+	AccidentalCoincidence // Way out of bounds -- completely different particles, or comparing with dark noise
+};
 struct T5_hit{
-	bool valid_hit = false; // Tells if the hit was out of bounds or was reconstructed inside
+	bool is_valid_hit = false; // Tells if the hit was out of bounds or was reconstructed inside
+	bool is_in_time_window = false;
+	HitQuality quality = HitQuality::AccidentalCoincidence;
 	std::optional<std::pair<double, double>> position; //X and Y coordinates of the T5 hit
 	std::optional<double> uncertainty; //Position uncertainty, assumed that v_eff and sigma_sipm are uncorrelated
 	std::optional<double> hit_time; // Time of the detection, calculated as average time of the two SiPMs
 	std::optional<double> sipm_time_a;
 	std::optional<double> sipm_time_b;
 	std::optional<int> scintillator_id;
-
 };
 
 struct event_T5_detection{
-	int event_nr;
+	int event_nr = -1;
+	bool HasHit = false;
+	bool HasMultipleHits = false;
+	bool HasValidHit = false;
+	bool HasMultipleValidHits = false;
+	bool HasMultipleScintillatorsHit = false;
+	bool HasOutOfBounds = false;
+	bool HasOutOfTimeWindow = false;
 	std::vector<T5_hit> T5_hits;
 };
 

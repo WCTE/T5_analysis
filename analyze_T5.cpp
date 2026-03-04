@@ -147,7 +147,7 @@ int main(int argc, char** argv){
 		hists.fill("n_event_hits", n_hits_in_T5_in_single_event);	
 		
 		for (const auto& hit : detections.T5_hits){
-			if (!hit.valid_hit){
+			if (!hit.is_valid_hit){
 				continue;
 			}
 			hists.fill("positions", hit.position->first, hit.position->second);
@@ -244,7 +244,7 @@ int main(int argc, char** argv){
 			     << "Average time: " << hit.hit_time.value() << "\t"
 			     << "First SiPM time: " << hit.sipm_time_a.value() << "\t"
 			     << "Second SiPM time: " << hit.sipm_time_b.value() << "\t"
-			     << "Valid hit?: " << hit.valid_hit << "\t"
+			     << "Valid hit?: " << hit.is_valid_hit << "\t"
 			     << endl;
 		}
 	}
