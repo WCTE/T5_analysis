@@ -141,10 +141,7 @@ int main(int argc, char** argv){
 		RVecI pmt_ids(arr_pmt_ids->data(), arr_pmt_ids->size());
 		RVecI mpmt_ids(arr_mpmt_ids->data(), arr_mpmt_ids->size());
 
-		if (!cut.hit_T0_T1(bm_time_ids, bm_charge_ids) ||
-				!cut.hit_T4(bm_charge_ids, bm_charges) ||
-				!cut.did_not_hit_HC(bm_charge_ids, bm_charges) ||
-				!cut.hit_T5(mpmt_ids, pmt_ids)){
+		if (!cut.hit_T5(mpmt_ids, pmt_ids)){
 			detections.event_nr = i;
 			all_T5_hits.push_back(detections);
 			continue;
