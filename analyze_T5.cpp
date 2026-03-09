@@ -4,6 +4,7 @@
 #include <string>
 #include <iomanip>
 #include <fstream>
+#include <unistd.h>
 
 #include <ROOT/RVec.hxx>
 #include <TH1D.h>
@@ -32,19 +33,38 @@ using std::cerr;
 using namespace ROOT;
 
 int main(int argc, char** argv){
-	
-	if (argc < 2){
-		cerr << "One argument expected, but was not provided. Usage: ./analyze_T5 <run_number>" << endl;
-		return -1;
-	}
-//	TApplication app("app", &argc, argv);
 
-	string arg = argv[1];
-	auto run_number = std::stoi(arg);
+	int run_number = -1;
+	string input_path = "";
+	string output_path = "output.root";
+
+	int opt;
+	while ((opt = getopt(argc, argv, "r:i:o:")) != -1) {
+		switch (opt) {
+			case 'r':
+				run_number = std::stoi(optarg);
+				break;
+			case 'i':
+				input_path = optarg;
+				break;
+			case 'o':
+				output_path = optarg;
+				break;
+			default:
+				cerr << "Usage: " << argv[0] << " -r <run_number> [-i <input_file>] [-o <output_file>]" << endl;
+				return -1;
+		}
+	}
+
 	RUN_NUMBER = run_number;
-	TString filename = "WCTE_data/charged_particle/WCTE_offline_R" + arg + "S0_VME_matched.root";
+	TString filename;
+	if (input_path.empty()){
+		 filename = "WCTE_data/charged_particle/WCTE_offline_R" + std::to_string(run_number) + "S0_VME_matched.root";
+	}else {
+		filename = input_path + "/WCTE_offline_R" + std::to_string(run_number) + "S0_VME_matched.root"; 
+	}
 	auto file = TFile::Open(filename, "READ");
-	
+
 	if (!file || file-> IsZombie()){
 		cerr << "ERROR, file did not open" << endl;
 		return -1;
@@ -102,13 +122,12 @@ int main(int argc, char** argv){
 	int n_invalid_hits = 0;
 	int n_events_out_of_bounds = 0;
 
-	vector<event_T5_detection> invalid_T5_hits;
-	vector<event_T5_detection> multivalidhits_events;
-	
+	vector<event_T5_detection> all_T5_hits;
 
 	for(size_t i = 0; i < n_events; i++){
 		tree->GetEntry(i);
 		//Print progress
+		event_T5_detection detections;
 
 		if (i % verb == 0) cout << "\rAnalyzed " << i << " of " << n_events << std::setprecision(2) << std::fixed <<
 			" events (" << static_cast<float>(i)/n_events * 100 << " %)" << std::flush << endl; 
@@ -122,12 +141,14 @@ int main(int argc, char** argv){
 		RVecI pmt_ids(arr_pmt_ids->data(), arr_pmt_ids->size());
 		RVecI mpmt_ids(arr_mpmt_ids->data(), arr_mpmt_ids->size());
 
-		
 		if (!cut.hit_T0_T1(bm_time_ids, bm_charge_ids) ||
-		    !cut.hit_T4(bm_charge_ids, bm_charges) ||
-		    !cut.did_not_hit_HC(bm_charge_ids, bm_charges) ||
-		    !cut.hit_T5(mpmt_ids, pmt_ids))
+				!cut.hit_T4(bm_charge_ids, bm_charges) ||
+				!cut.did_not_hit_HC(bm_charge_ids, bm_charges) ||
+				!cut.hit_T5(mpmt_ids, pmt_ids)){
+			detections.event_nr = i;
+			all_T5_hits.push_back(detections);
 			continue;
+		}
 
 		n_pass_cut++;
 
@@ -135,41 +156,42 @@ int main(int argc, char** argv){
 		auto T5_board_ids = pmt_ids[mask_T5_board];
 		auto T5_board_times = pmt_times[mask_T5_board];
 
-		auto detections = recon.Return_position(i, *arr_mpmt_ids, *arr_pmt_ids, *arr_pmt_times);
+		detections = recon.Return_position(i, *arr_mpmt_ids, *arr_pmt_ids, *arr_pmt_times);
+
 
 		if (detections.HasValidHit) n_T5_valid_events++;
 		if (detections.HasMultipleValidHits){
 			n_events_with_multiple_valid_hits++;
-			multivalidhits_events.push_back(detections);
 			if (detections.HasInTimeWindow) n_events_with_multiple_valid_hits_had_one_in_expected_window++;
 			if (detections.HasMultipleScintillatorsHit) n_events_with_multiple_scint_hits++;
 		}
 		if (detections.HasInTimeWindow) n_events_with_valid_hits_in_expected_window++;
-		if (detections.HasHit && !detections.HasValidHit) {invalid_T5_hits.push_back(detections); n_invalid_hits++;}
+		if (detections.HasHit && !detections.HasValidHit) {n_invalid_hits++;}
 		if (detections.HasOutOfBounds) n_events_out_of_bounds++;
 
 
 		int n_hits_in_T5_in_single_event = 0;
-		for (int i = 0; i < cut.Get_T5_ids().size(); i++){
-			auto T5_id = cut.Get_T5_ids().at(i);
+		for (int j = 0; j < cut.Get_T5_ids().size(); j++){
+			auto T5_id = cut.Get_T5_ids().at(j);
 			int sum_hits_T5_i = VecOps::Sum(T5_board_ids == T5_id);
-			hists.fill(Form("T5_number_of_hits_%i", i), sum_hits_T5_i);
+			hists.fill(Form("T5_number_of_hits_%i", j), sum_hits_T5_i);
 			n_hits_in_T5_in_single_event += sum_hits_T5_i;
 		}
 		hists.fill("n_event_hits", n_hits_in_T5_in_single_event);	
-		
+
 		for (const auto& hit : detections.T5_hits){
 			if (!hit.is_valid_hit || hit.quality != HitQuality::Perfect){
 				continue;
 			}
-			hists.fill("positions", hit.position->first, hit.position->second);
+			hists.fill("positions", hit.position_x, hit.position_y);
 		}
+		all_T5_hits.push_back(detections);
 
 	}
 	auto hist = hists.get_histogram_2D("positions");
 	TF2* gaus_2D = new TF2("gaus_2D", "bigaus", recon.Get_scint_xmin(3), recon.Get_scint_xmax(3), recon.Get_ymin(), recon.Get_ymax());
 	gaus_2D->SetParameters(130, 0, 40, 0, 40, 0);
-	hist->Fit(gaus_2D, "RQ");
+	hist->Fit(gaus_2D, "R");
 
 	gaus_2D = (TF2*)hist->GetFunction("gaus_2D");
 
@@ -223,65 +245,184 @@ int main(int argc, char** argv){
 	hist->GetListOfFunctions()->Add(contour_sigma);
 
 
-	for (int i = 0; i < 8; i++){
-		TString h_name = "positions_" + std::to_string(i); 
-		hists. hist_projectX("positions", h_name.Data(), i+1, i+1);
-		hists. get_histogram(h_name.Data())->Fit("gaus", "QR", "", recon.Get_scint_xmin(i), recon. Get_scint_xmax(i));
-	}
-	TString plots_directory = "plots/Run_" + std::to_string(run_number);
-	gSystem->Exec("mkdir -p " + plots_directory);
-	gSystem->cd(plots_directory);
-	hists.print_exclusive("positions", 1000, 900);
-	hists.print_all();
-	hists.save_all("hists");
+	// for (int i = 0; i < 8; i++){
+	// 	TString h_name = "positions_" + std::to_string(i); 
+	// 	hists. hist_projectX("positions", h_name.Data(), i+1, i+1);
+	// 	hists. get_histogram(h_name.Data())->Fit("gaus", "QR", "", recon.Get_scint_xmin(i), recon. Get_scint_xmax(i));
+	// }
+	// TString plots_directory = "plots/Run_" + std::to_string(run_number);
+	// gSystem->Exec("mkdir -p " + plots_directory);
+	// gSystem->cd(plots_directory);
+	// hists.print_exclusive("positions", 1000, 900);
+	// hists.print_all();
+	// hists.save_all("hists");
 
-	cout << "Printing out invalid hits: " << endl;
-	for (const auto& event : invalid_T5_hits){
-		cout << "Event " << event.event_nr << ":" << endl;
-		for(const auto& hit : event.T5_hits){
-			cout << "Scintillator ID: " << hit.scintillator_id.value() << "\t"
-			     << "Average time: " << hit.hit_time.value() << "\t"
-			     << "First SiPM time: " << hit.sipm_time_a.value() << "\t"
-			     << "Second SiPM time: " << hit.sipm_time_b.value() << "\t"
-			     << endl;
-		}	
-	}
-
-	cout << endl;
-	cout << "Printing out events with multiple valid hits: " << endl;
-	for (const auto& event : multivalidhits_events){
-		cout << "Event " << event.event_nr << ": " << endl;
-		for (const auto& hit : event.T5_hits){
-			cout << "Scintillator ID: " << hit.scintillator_id.value() << "\t"
-			     << "Average time: " << hit.hit_time.value() << "\t"
-			     << "First SiPM time: " << hit.sipm_time_a.value() << "\t"
-			     << "Second SiPM time: " << hit.sipm_time_b.value() << "\t"
-			     << "Valid hit?: " << hit.is_valid_hit << "\t"
-			     << endl;
-		}
-	}
+	// cout << "Printing out invalid hits: " << endl;
+	// for (const auto& event : invalid_T5_hits){
+	// 	cout << "Event " << event.event_nr << ":" << endl;
+	// 	for(const auto& hit : event.T5_hits){
+	// 		cout << "Scintillator ID: " << hit.scintillator_id.value() << "\t"
+	// 		     << "Average time: " << hit.hit_time.value() << "\t"
+	// 		     << "First SiPM time: " << hit.sipm_time_a.value() << "\t"
+	// 		     << "Second SiPM time: " << hit.sipm_time_b.value() << "\t"
+	// 		     << endl;
+	// 	}	
+	// }
+	//
+	// cout << endl;
+	// cout << "Printing out events with multiple valid hits: " << endl;
+	// for (const auto& event : multivalidhits_events){
+	// 	cout << "Event " << event.event_nr << ": " << endl;
+	// 	for (const auto& hit : event.T5_hits){
+	// 		cout << "Scintillator ID: " << hit.scintillator_id.value() << "\t"
+	// 		     << "Average time: " << hit.hit_time.value() << "\t"
+	// 		     << "First SiPM time: " << hit.sipm_time_a.value() << "\t"
+	// 		     << "Second SiPM time: " << hit.sipm_time_b.value() << "\t"
+	// 		     << "Valid hit?: " << hit.is_valid_hit << "\t"
+	// 		     << "Out of Bounds? " << (hit.quality == HitQuality::OutOfBounds)
+	// 		     << endl;
+	// 	}
+	// }
 
 	cout << endl << n_pass_cut << " events out of " << n_events << " passed cuts" << endl;
 	cout << n_T5_valid_events << " events got a valid reconstruction -- "
-	     << n_pass_cut - n_T5_valid_events << " were mismatched events?" << endl
-	     << n_invalid_hits << " events were invalid" << endl
-	     << n_events_with_valid_hits_in_expected_window << " events of them had a hit in the expected time window" << endl
-	     << n_events_out_of_bounds << " events had a reconstruction out of bounds" << endl
-	     << endl
-		
+		<< n_pass_cut - n_T5_valid_events << " were mismatched events?" << endl
+		<< n_invalid_hits << " events were invalid -- mismatched events (the only paired SiPM hits were at totally different times)" << endl
+		<< n_events_with_valid_hits_in_expected_window << " events of them had a hit in the expected time window" << endl
+		<< n_events_out_of_bounds << " events had a reconstruction out of bounds" << endl
+		<< endl
 
-	     << n_events_with_multiple_valid_hits << " events had multiple valid hits -- " 
-	     << n_events_with_multiple_valid_hits_had_one_in_expected_window << " of those had at least one hit in the expected time window" << endl
-	     << n_events_with_multiple_scint_hits << " events had hits in multiple scintillators -- in the expected time window" << endl
-	     << endl; 
+
+		<< n_events_with_multiple_valid_hits << " events had multiple valid hits -- " 
+		<< n_events_with_multiple_valid_hits_had_one_in_expected_window << " of those had at least one hit in the expected time window" << endl
+		<< n_events_with_multiple_scint_hits << " events had hits in multiple scintillators -- in the expected time window" << endl
+		<< endl; 
 	cout << endl;
 
-	std::ofstream file_out;
-	file_out.open("Beam_profile_widths.dat", std::ofstream::app);
-	file_out << run_number << "\t"
-		<< BEAM_MOMENTUM << "\t"
-		<< sigma_x << "\t"
-		<< sigma_y << "\t" << endl;
+	file->Close();
+
+
+	TFile* output_file = TFile::Open("output.root", "RECREATE");
+	if (!output_file || output_file->IsZombie()){
+		cerr << "ERROR: Did not open output file" << endl;
+		return -1;
+	}
+
+	output_file->cd();
+	TTree* output_tree = new TTree("T5_Events", "Reconstructed T5 events");
+	// --- Single-value branches (per event) ---
+	int b_n_particles = 0;
+	int b_event_nr = 0;
+	bool b_HasValidHit;
+	bool b_HasMultipleScintillatorsHit;
+	bool b_HasOutOfTimeWindow;
+	bool b_HasInTimeWindow;
+
+	output_tree->Branch("event_nr", &b_event_nr, "event_nr/I");
+	output_tree->Branch("T5_particle_nr", &b_n_particles, "T5_particle_nr/I");
+	output_tree->Branch("T5_HasValidHit", &b_HasValidHit, "T5_HasValidHit/O");
+	output_tree->Branch("T5_HasMultipleScintillatorsHit", &b_HasMultipleScintillatorsHit, "T5_HasMultipleScintillatorsHit/O");
+	output_tree->Branch("T5_HasOutOfTimeWindow", &b_HasOutOfTimeWindow, "T5_HasOutOfTimeWindow/O");
+	output_tree->Branch("T5_HasInTimeWindow", &b_HasInTimeWindow, "T5_HasInTimeWindow/O");
+
+	// --- Vector branches (multiple hits per event) ---
+	// Primary hits -- hits in the expected timeframe
+	std::vector<int>* b_hit_is_in_bounds = new std::vector<int>();
+	std::vector<double>* b_hit_pos_x = new std::vector<double>();
+	std::vector<double>* b_hit_pos_y = new std::vector<double>();
+	std::vector<double>* b_hit_time = new std::vector<double>();
+
+	output_tree->Branch("T5_hit_is_in_bounds", &b_hit_is_in_bounds);
+	output_tree->Branch("T5_hit_pos_x", &b_hit_pos_x);
+	output_tree->Branch("T5_hit_pos_y", &b_hit_pos_y);
+	output_tree->Branch("T5_hit_time", &b_hit_time);
+
+	// Secondary hits -- hits outside of the main bunch
+	std::vector<bool>* b_secondary_hit_is_in_bounds = new std::vector<bool>();
+	std::vector<double>* b_secondary_hit_pos_x = new std::vector<double>();
+	std::vector<double>* b_secondary_hit_pos_y = new std::vector<double>();
+	std::vector<double>* b_secondary_hit_time = new std::vector<double>();
+
+	output_tree->Branch("T5_secondary_hit_is_in_bounds", &b_secondary_hit_is_in_bounds);
+	output_tree->Branch("T5_secondary_hit_pos_x", &b_secondary_hit_pos_x);
+	output_tree->Branch("T5_secondary_hit_pos_y", &b_secondary_hit_pos_y);
+	output_tree->Branch("T5_secondary_hit_time", &b_secondary_hit_time);
+
+
+	for (const auto& event : all_T5_hits){
+		b_n_particles = 0;
+		b_event_nr = event.event_nr;
+		b_HasValidHit = false;
+		b_HasMultipleScintillatorsHit = false;
+		b_HasOutOfTimeWindow = false;
+		b_HasInTimeWindow = false;
+
+		b_hit_is_in_bounds->clear();
+		b_hit_pos_x->clear();
+		b_hit_pos_y->clear();
+		b_hit_time->clear();
+
+		b_secondary_hit_is_in_bounds->clear();
+		b_secondary_hit_pos_x->clear();
+		b_secondary_hit_pos_y->clear();
+		b_secondary_hit_time->clear();
+
+		if (!event.HasValidHit){
+			output_tree->Fill();
+			continue;
+		}
+		b_HasValidHit = event.HasValidHit;
+		b_HasMultipleScintillatorsHit = event.HasMultipleScintillatorsHit;
+		b_HasInTimeWindow = event.HasInTimeWindow;
+		b_HasOutOfTimeWindow = event.HasOutOfTimeWindow;
+		
+		for (const auto& hit : event.T5_hits){
+			if (hit.quality == HitQuality::AccidentalCoincidence) continue;
+			if (hit.is_in_time_window){
+				b_hit_time->push_back(hit.hit_time);
+				b_hit_pos_x->push_back(hit.position_x);
+				b_hit_pos_y->push_back(hit.position_y);
+				if (hit.quality == HitQuality::Perfect)	b_hit_is_in_bounds->push_back(true);
+				else b_hit_is_in_bounds->push_back(false);
+			}
+			else{
+				b_secondary_hit_time->push_back(hit.hit_time);
+				b_secondary_hit_pos_x->push_back(hit.position_x);
+				b_secondary_hit_pos_y->push_back(hit.position_y);
+				if (hit.quality == HitQuality::Perfect)	b_secondary_hit_is_in_bounds->push_back(true);
+				else b_secondary_hit_is_in_bounds->push_back(false);
+				
+			}
+			b_n_particles++;
+		}
+		
+		output_tree->Fill();
+	}
+	output_tree->Write();
+
+	delete b_hit_time;
+	delete b_hit_pos_x;
+	delete b_hit_pos_y;
+	delete b_hit_is_in_bounds;
+	delete b_secondary_hit_time;
+	delete b_secondary_hit_pos_x;
+	delete b_secondary_hit_pos_y;
+	delete b_secondary_hit_is_in_bounds;
+
+	output_file->Close();
+
+
+
+
+
+
+	// std::ofstream file_out;
+	// file_out.open("Beam_profile_widths.dat", std::ofstream::app);
+	// file_out << run_number << "\t"
+	// 	<< BEAM_MOMENTUM << "\t"
+	// 	<< sigma_x << "\t"
+	// 	<< sigma_y << "\t" << endl;
+
 
 
 	//	app.Run();

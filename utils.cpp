@@ -127,20 +127,27 @@ void Histograms::set_default_bins(const int bins){
 }
 
 void Histograms::book1D(const std::string& name,
-		   const std::string& title){
-			m_hists_map[name] = new TH1D(name. c_str(), title.c_str(), m_default_bins, m_default_min, m_default_max);
+		        const std::string& title){
+	auto hist = new TH1D(name. c_str(), title.c_str(), m_default_bins, m_default_min, m_default_max);
+	hist->SetDirectory(nullptr);
+	m_hists_map[name] = hist;
+	
 }
 void Histograms::book1D(const std::string& name,
-		   const std::string& title,
+		        const std::string& title,
 		   int bins,
 		   double xmin,
 		   double xmax){
-			m_hists_map[name] = new TH1D(name. c_str(), title.c_str(), bins, xmin, xmax);
+	auto hist = new TH1D(name. c_str(), title.c_str(), bins, xmin, xmax);
+	hist->SetDirectory(nullptr);
+	m_hists_map[name] = hist;
 }
 void Histograms::book2D(const std::string& name,
 		   const std::string& title){
-			m_hists_map[name] = new TH2D(name. c_str(), title.c_str(), m_default_bins, m_default_min, m_default_max,
-										   m_default_bins, m_default_min, m_default_max);
+	auto hist = new TH2D(name. c_str(), title.c_str(), m_default_bins, m_default_min, m_default_max,
+							   m_default_bins, m_default_min, m_default_max);
+	hist->SetDirectory(nullptr);
+	m_hists_map[name] = hist;
 }
 void Histograms::book2D(const std::string& name,
 		   const std::string& title,
@@ -150,7 +157,10 @@ void Histograms::book2D(const std::string& name,
 		   int ybins,
 		   double ymin,
 		   double ymax){
-			m_hists_map[name] = new TH2D(name. c_str(), title.c_str(), xbins, xmin, xmax, ybins, ymin, ymax);
+	auto hist = new TH2D(name. c_str(), title.c_str(), xbins, xmin, xmax,
+							   ybins, ymin, ymax);
+	hist->SetDirectory(nullptr);
+	m_hists_map[name] = hist;
 }
 void Histograms::fill(const std::string& name, double value){
 	m_hists_map[name]->Fill(value);
@@ -184,6 +194,7 @@ void Histograms::print(const std::string& name){
 	}
 	TString out_name = name + ".png";
 	canvas->Print(out_name);
+	delete canvas;
 }
 void Histograms::print_exclusive(const std::string& name, int c_size_x, int c_size_y){
 	TString c_name = "c_" + name;
@@ -203,6 +214,7 @@ void Histograms::print_exclusive(const std::string& name, int c_size_x, int c_si
 	}
 	TString out_name = name + ".png";
 	canvas->Print(out_name);
+	delete canvas;
 }
 
 void Histograms::print_all(){

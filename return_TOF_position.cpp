@@ -18,28 +18,30 @@ TOF_reconstructor::TOF_reconstructor(double v_eff) : _v_eff(v_eff),
 
 
 void TOF_reconstructor::SetVeff(double v){ _v_eff = v; }
+void TOF_reconstructor::SetVeffUncertainty(double uncertainty){ v_eff_uncertainty = uncertainty; }
 void TOF_reconstructor::SetVerbosity(int i){ _verbose = i; }
 
 double TOF_reconstructor::GetVeff() const { return _v_eff; }
-bool TOF_reconstructor::GetVerbosity(){ return _verbose;}
+double TOF_reconstructor::GetVeff_uncertainty() const { return v_eff_uncertainty; }
+bool TOF_reconstructor::GetVerbosity() const{ return _verbose;}
 
-double TOF_reconstructor::GetScintDimensionX(int i){
+double TOF_reconstructor::GetScintDimensionX(int i) const{
 	return SCINT_DIMENSIONS[i];
 }
-double TOF_reconstructor::GetScintPositionY(int i){
+double TOF_reconstructor::GetScintPositionY(int i)const{
 	return SCINT_Y_POSITIONS[i];
 }
-double TOF_reconstructor::Get_scint_xmax(int i){
+double TOF_reconstructor::Get_scint_xmax(int i)const{
 	return SCINT_DIMENSIONS[i]/2;
 }
-double TOF_reconstructor::Get_scint_xmin(int i){
+double TOF_reconstructor::Get_scint_xmin(int i)const{
 	return -SCINT_DIMENSIONS[i]/2;
 }
-double TOF_reconstructor::Get_ymax(){
+double TOF_reconstructor::Get_ymax()const{
 	double scintillator_block_halfheight = SCINT_BLOCK_HEIGHT / 2.0;
 	return SCINT_Y_POSITIONS[0] + scintillator_block_halfheight;
 }
-double TOF_reconstructor::Get_ymin(){
+double TOF_reconstructor::Get_ymin()const{
 	double scintillator_block_halfheight = SCINT_BLOCK_HEIGHT / 2.0;
 	return SCINT_Y_POSITIONS[7] - scintillator_block_halfheight;
 }
@@ -91,17 +93,16 @@ event_T5_detection TOF_reconstructor::Return_position(const int event_nr,
 				double avg_time = (sipm_time_a + sipm_time_b) / 2;
 				hit.hit_time = avg_time;
 				is_valid_hit = true;
-				pair<double,double> position;
-				position.first = (time_diff - SCINT_BIAS.at(i)) * _v_eff / 2.0;
-				position.second = SCINT_Y_POSITIONS[i];
+				double position_x = (time_diff - SCINT_BIAS.at(i)) * _v_eff / 2.0;
+				double position_y = SCINT_Y_POSITIONS[i];
 				double uncertainty = sqrt(pow(v_eff_uncertainty, 2) * pow(time_diff/2, 2) + pow(sigma_sipm_i[i], 2) * pow(_v_eff/2, 2));
 				double margin_of_error = 3 * uncertainty;
 
-				if (abs(position.first) <= SCINT_DIMENSIONS[i]/2){
+				if (abs(position_x) <= SCINT_DIMENSIONS[i]/2){
 					is_valid_hit = true;
 					hit.quality = HitQuality::Perfect;
 				}
-				else if (abs(position.first) <= (SCINT_DIMENSIONS[i]/2 + margin_of_error)){
+				else if (abs(position_x) <= (SCINT_DIMENSIONS[i]/2 + margin_of_error)){
 					is_valid_hit = true;
 					hit.quality = HitQuality::OutOfBounds;
 					if (_verbose) cout << "Hit was reconstructed out of bounds -- due to detector smearing?" << endl;
@@ -112,12 +113,13 @@ event_T5_detection TOF_reconstructor::Return_position(const int event_nr,
 					if (_verbose) cout << "Hit was extremely out of bounds, is not valid" << endl;
 				}
 				// _verbose checks
-				if (_verbose) cout << "X coordinate is:\t" << position.first;
+				if (_verbose) cout << "X coordinate is:\t" << position_x;
 
 				//calculate the position uncertainty
 				if (_verbose) cout << "\tX uncertainty is:\t" << uncertainty << endl;
 				hit.uncertainty = uncertainty;
-				hit.position = position;
+				hit.position_x = position_x;
+				hit.position_y = position_y;
 				hit.is_valid_hit = is_valid_hit;
 				hit.scintillator_id = i;
 				// save the hit to the vector of all hits in the event
@@ -138,7 +140,7 @@ event_T5_detection TOF_reconstructor::Return_position(const int event_nr,
 			n_valid_hits++;
 		}
 		if (hit.is_valid_hit && hit.is_in_time_window){
-			unique_scints.insert(hit.scintillator_id.value());	
+			unique_scints.insert(hit.scintillator_id);	
 		}
 		if (hit.quality == HitQuality::OutOfBounds) detection.HasOutOfBounds = true;
 		if (!hit.is_in_time_window && hit.quality != HitQuality::AccidentalCoincidence) detection.HasOutOfTimeWindow = true;
@@ -150,36 +152,5 @@ event_T5_detection TOF_reconstructor::Return_position(const int event_nr,
 
 	return detection;
 }
-bool TOF_reconstructor::HasMultiValidHits(const std::vector<T5_hit>& hits) {
-	// If the vector is too small, we can return false immediately
-	if (hits.size() < 2) return false;
 
-	int valid_count = 0;
-	for (const auto& hit : hits) {
-		if (hit.is_valid_hit) {
-			valid_count++;
-		}
-		// "Smart" Optimization: Stop as soon as we confirm > 1
-		if (valid_count > 1) {
-			return true;
-		}
-	}
-	return false;
-}
-
-int TOF_reconstructor::HasWeirdHits(const std::vector<T5_hit>& hits){
-	// return 0 if event has hits reconstructed outside of the scintillator scope, 1 if the event has multiple hits, -1 if event is empty (no pair hit)
-	for (const auto& hit : hits){
-		if (!hit.is_valid_hit && hit.position) return 0;
-	}
-	if (hits.size() > 1) return 1;
-	return -1;
-}
-bool TOF_reconstructor::HasValidHits(const std::vector<T5_hit> &hits){
-	// checks if the event has at least one valid hit
-	for (const auto& hit : hits){
-		if (hit.is_valid_hit) return true;
-	}
-	return false;
-}
 

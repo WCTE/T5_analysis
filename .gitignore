@@ -1,5 +1,5 @@
 plots/
 WCTE_data/
 
-./*.o
-./*.root
+/*.o
+/*.root

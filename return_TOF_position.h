@@ -1,12 +1,10 @@
 #ifndef RETURN_TOF_POSITION_H
 #define RETURN_TOF_POSITION_H
 
-#include <optional>
+#include <iostream>
 #include <utility>
 #include <array>
 #include <vector>
-#include <set>
-#include <iostream>
 #include <math.h>
 
 namespace T5_CONFIG { // a namespace storing the parameters of the T5 detector
@@ -53,27 +51,43 @@ enum class HitQuality{
 	AccidentalCoincidence // Way out of bounds -- completely different particles, or comparing with dark noise
 };
 struct T5_hit{
-	bool is_valid_hit = false; // Tells if the hit was out of bounds or was reconstructed inside
+	// Tells if the hit was out of bounds or was reconstructed inside
+	bool is_valid_hit = false; 
 	bool is_in_time_window = false;
+	// Says where the event was reconstructed:
+	// 	Perfect = inside of a scintillator; 
+	//	OutOfBounds = outside of scintillator dimensions;
+	//	Accidental coincidence = Way out of the scintillator dimensions -- comparison of two completely different times/different particles
 	HitQuality quality = HitQuality::AccidentalCoincidence;
-	std::optional<std::pair<double, double>> position; //X and Y coordinates of the T5 hit
-	std::optional<double> uncertainty; //Position uncertainty, assumed that v_eff and sigma_sipm are uncorrelated
-	std::optional<double> hit_time; // Time of the detection, calculated as average time of the two SiPMs
-	std::optional<double> sipm_time_a;
-	std::optional<double> sipm_time_b;
-	std::optional<int> scintillator_id;
+	double position_x = -999;
+	double position_y = -999; //X and Y coordinates of the T5 hit
+	double uncertainty = -999; //Position uncertainty, assumed that v_eff and sigma_sipm are uncorrelated
+	double hit_time = -999; // Time of the detection, calculated as average time of the two SiPMs
+	double sipm_time_a = -999;
+	double sipm_time_b = -999;
+	int scintillator_id = -1;
 };
 
 struct event_T5_detection{
-	int event_nr = -1;
-	bool HasHit = false;
-	bool HasMultipleHits = false;
-	bool HasValidHit = false;
-	bool HasMultipleValidHits = false;
-	bool HasMultipleScintillatorsHit = false;
-	bool HasOutOfBounds = false;
+	// Event number
+	int event_nr = -1;	
+	// Says, if the event has at least one hit -- can be an accidental coincidence
+	bool HasHit = false;	
+	// Does event have more than one hit (vector of T5 hits is larger than 1)
+	bool HasMultipleHits = false; 
+	// Does the event have one valid hit -- either in the scintillator, or out of OutOfBounds
+	bool HasValidHit = false;	
+	// Are there more than one hits, that are valid?
+	bool HasMultipleValidHits = false;	
+	// Were more than one scintillators hit in a single event? -- Hit was in the expected timeframe, and was valid
+	bool HasMultipleScintillatorsHit = false; 
+	// Does the event have a reconstruction out of bounds?
+	bool HasOutOfBounds = false; 
+ 	// Does the event have at least one event out of the expected time frame?	
 	bool HasOutOfTimeWindow = false;
-	bool HasInTimeWindow = false;
+	// Does the event have at least one hit in the expected time window? (main time peak -- between -140 and -170 ns)
+	bool HasInTimeWindow = false; 
+	// A vector of the final T5 hits
 	std::vector<T5_hit> T5_hits;
 };
 
@@ -83,27 +97,26 @@ class TOF_reconstructor{
 	public:
 		explicit TOF_reconstructor(double v_eff = 181.974);
 		void SetVeff(double v);
+		void SetVeffUncertainty(double uncertainty);
 		void SetVerbosity(int i);
 
 		double GetVeff() const;
-		bool GetVerbosity();
-		double GetScintDimensionX(int i);
-		double GetScintPositionY(int i);
-		double Get_scint_xmin(int i);
-		double Get_scint_xmax(int i);
-		double Get_ymax();
-		double Get_ymin();
+		double GetVeff_uncertainty() const;
+		bool GetVerbosity() const;
+		double GetScintDimensionX(int i) const;
+		double GetScintPositionY(int i) const;
+		double Get_scint_xmin(int i) const;
+		double Get_scint_xmax(int i) const;
+		double Get_ymax() const;
+		double Get_ymin() const;
 
 		event_T5_detection Return_position(const int event_nr,
 				const std::vector<int>& hit_mpmt_ids,
 				const std::vector<int>& hit_pmt_ids, 
 				const std::vector<double>& hit_pmt_times);
-		static bool HasMultiValidHits(const std::vector<T5_hit>& hits);
-		static int HasWeirdHits(const std::vector<T5_hit>& hits);
-		static bool HasValidHits(const std::vector<T5_hit>& hits);
 	private:
 		double _v_eff;
-		const double v_eff_uncertainty;
+		double v_eff_uncertainty;
 		//Scintillator time uncertainty, acquired through minimizing chi2 function
 		std::array<double, 8> sigma_sipm_i;
 		// uncertainty of the scintillator resolution
