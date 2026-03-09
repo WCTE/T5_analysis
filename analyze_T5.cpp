@@ -36,7 +36,7 @@ int main(int argc, char** argv){
 
 	int run_number = -1;
 	string input_path = "";
-	string output_path = "output.root";
+	TString output_path = "output.root";
 
 	int opt;
 	while ((opt = getopt(argc, argv, "r:i:o:")) != -1) {
@@ -302,7 +302,8 @@ int main(int argc, char** argv){
 	file->Close();
 
 
-	TFile* output_file = TFile::Open("output.root", "RECREATE");
+	
+	TFile* output_file = TFile::Open(output_path, "RECREATE");
 	if (!output_file || output_file->IsZombie()){
 		cerr << "ERROR: Did not open output file" << endl;
 		return -1;
