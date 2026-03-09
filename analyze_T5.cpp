@@ -3,7 +3,6 @@
 #include <iostream>
 #include <string>
 #include <iomanip>
-#include <fstream>
 #include <unistd.h>
 
 #include <ROOT/RVec.hxx>
@@ -16,12 +15,12 @@
 #include <TSystem.h>
 #include <TF2.h>
 #include <TLatex.h>
+#include <TString.h>
 
 #include <nlohmann/json.hpp>
 
-#include "./utils.h"
-#include "./return_TOF_position.h"
-#include "TString.h"
+#include "utils.h"
+#include "return_TOF_position.h"
 #include "buffer.h"
 
 using std::vector;
@@ -70,11 +69,11 @@ int main(int argc, char** argv){
 		return -1;
 	}
 
-	std::ifstream config_file("/home/frantisek/scripts/config.json");
-	nlohmann::json config = nlohmann::json:: parse(config_file);
-	auto& run_config = config[std::to_string(run_number)];
-	BEAM_MOMENTUM = run_config.value("Beam momentum (MeV/c)", 0);
-	cout << "Config file loaded, beam momentum is " << BEAM_MOMENTUM << "MeV/c" << endl ;
+	// std::ifstream config_file("/home/frantisek/scripts/config.json");
+	// nlohmann::json config = nlohmann::json:: parse(config_file);
+	// auto& run_config = config[std::to_string(run_number)];
+	// BEAM_MOMENTUM = run_config.value("Beam momentum (MeV/c)", 0);
+	// cout << "Config file loaded, beam momentum is " << BEAM_MOMENTUM << "MeV/c" << endl ;
 
 
 	auto tree = file->Get<TTree>("WCTEReadoutWindows");
@@ -109,11 +108,11 @@ int main(int argc, char** argv){
 
 	Cuts cut;
 	TOF_reconstructor recon;
-	Histograms hists;
-	setup_histograms(hists, recon);
+	// Histograms hists;
+	// setup_histograms(hists, recon);
 	int n_pass_cut = 0;
 	int n_T5_valid_events = 0;
-	int n_events = tree->GetEntries();
+	auto n_events = tree->GetEntries();
 	int verb = 1000;
 	int n_events_with_multiple_valid_hits = 0;
 	int n_events_with_valid_hits_in_expected_window = 0;
@@ -124,7 +123,7 @@ int main(int argc, char** argv){
 
 	vector<event_T5_detection> all_T5_hits;
 
-	for(size_t i = 0; i < n_events; i++){
+	for(long long i = 0; i < n_events; i++){
 		tree->GetEntry(i);
 		//Print progress
 		event_T5_detection detections;
@@ -168,78 +167,78 @@ int main(int argc, char** argv){
 
 
 		int n_hits_in_T5_in_single_event = 0;
-		for (int j = 0; j < cut.Get_T5_ids().size(); j++){
+		for (size_t j = 0; j < cut.Get_T5_ids().size(); j++){
 			auto T5_id = cut.Get_T5_ids().at(j);
 			int sum_hits_T5_i = VecOps::Sum(T5_board_ids == T5_id);
-			hists.fill(Form("T5_number_of_hits_%i", j), sum_hits_T5_i);
+			// hists.fill(Form("T5_number_of_hits_%i", j), sum_hits_T5_i);
 			n_hits_in_T5_in_single_event += sum_hits_T5_i;
 		}
-		hists.fill("n_event_hits", n_hits_in_T5_in_single_event);	
+		// hists.fill("n_event_hits", n_hits_in_T5_in_single_event);	
 
-		for (const auto& hit : detections.T5_hits){
-			if (!hit.is_valid_hit || hit.quality != HitQuality::Perfect){
-				continue;
-			}
-			hists.fill("positions", hit.position_x, hit.position_y);
-		}
+		// for (const auto& hit : detections.T5_hits){
+		// 	if (!hit.is_valid_hit || hit.quality != HitQuality::Perfect){
+		// 		continue;
+		// 	}
+		// 	// hists.fill("positions", hit.position_x, hit.position_y);
+		// }
 		all_T5_hits.push_back(detections);
 
 	}
-	auto hist = hists.get_histogram_2D("positions");
-	TF2* gaus_2D = new TF2("gaus_2D", "bigaus", recon.Get_scint_xmin(3), recon.Get_scint_xmax(3), recon.Get_ymin(), recon.Get_ymax());
-	gaus_2D->SetParameters(130, 0, 40, 0, 40, 0);
-	hist->Fit(gaus_2D, "R");
-
-	gaus_2D = (TF2*)hist->GetFunction("gaus_2D");
-
-	double volume = gaus_2D->GetParameter(0);
-	double sig_x  = gaus_2D->GetParameter(2);
-	double sig_y  = gaus_2D->GetParameter(4);
-	double rho    = gaus_2D->GetParameter(5); // Correlation factor
-
-	// 3. Calculate the TRUE mathematical peak height of the bigaus function
-	double denominator = 2.0 * TMath::Pi() * sig_x * sig_y * std::sqrt(1.0 - rho*rho);
-	double peak_amplitude = volume / denominator;
-
-	// 4. Define your contour levels! 
-	// 1-sigma drops to e^(-0.5)
-	// 2-sigma drops to e^(-2.0)
-	// 3-sigma drops to e^(-4.5)
-
-	// Let's draw all 3 levels to make it look incredibly professional:
-	double contours[3];
-	contours[0] = peak_amplitude * std::exp(-4.5); // 3-sigma (widest, lowest)
-	contours[1] = peak_amplitude * std::exp(-2.0); // 2-sigma
-	contours[2] = peak_amplitude * std::exp(-0.5); // 1-sigma (tightest, highest)
-
-	// 5. Apply the contours to your TF2
-	// The arguments are: (number_of_levels, array_of_levels)
-	gaus_2D->SetContour(3, contours);
-
-	// 6. Make the contour lines stand out against the color map
-	gaus_2D->SetLineColor(kRed);
-	gaus_2D->SetLineWidth(2);
-	gaus_2D->SetLineStyle(1); // Solid lines
-
-	double sigma_x = gaus_2D->GetParameter(2);
-	double sigma_y = gaus_2D->GetParameter(4);
-
-	TString txt_sigma_x = Form("#sigma_{x} = %.2f mm", sigma_x);
-	TString txt_sigma_y = Form("#sigma_{y} = %.2f mm", sigma_y);
-
-	double offset = 10.0;
-	TLatex* ltx_sigX = new TLatex(sigma_x - offset, sigma_y, txt_sigma_x);
-	TLatex* ltx_sigY = new TLatex(sigma_x - offset, sigma_y - 5.0, txt_sigma_y);
-
-	ltx_sigX->SetTextSize(0.04); ltx_sigX->SetTextColor(kBlack);
-	ltx_sigY->SetTextSize(0.04); ltx_sigY->SetTextColor(kBlack);
-
-	TLatex* contour_sigma = new TLatex(sigma_x - offset, -sigma_y + offset, "1#sigma");
-	contour_sigma->SetTextSize(0.04); contour_sigma->SetTextColor(kBlack);
-
-	hist->GetListOfFunctions()->Add(ltx_sigX);
-	hist->GetListOfFunctions()->Add(ltx_sigY);
-	hist->GetListOfFunctions()->Add(contour_sigma);
+	// auto hist = hists.get_histogram_2D("positions");
+	// TF2* gaus_2D = new TF2("gaus_2D", "bigaus", recon.Get_scint_xmin(3), recon.Get_scint_xmax(3), recon.Get_ymin(), recon.Get_ymax());
+	// gaus_2D->SetParameters(130, 0, 40, 0, 40, 0);
+	// hist->Fit(gaus_2D, "R");
+	//
+	// gaus_2D = (TF2*)hist->GetFunction("gaus_2D");
+	//
+	// double volume = gaus_2D->GetParameter(0);
+	// double sig_x  = gaus_2D->GetParameter(2);
+	// double sig_y  = gaus_2D->GetParameter(4);
+	// double rho    = gaus_2D->GetParameter(5); // Correlation factor
+	//
+	// // 3. Calculate the TRUE mathematical peak height of the bigaus function
+	// double denominator = 2.0 * TMath::Pi() * sig_x * sig_y * std::sqrt(1.0 - rho*rho);
+	// double peak_amplitude = volume / denominator;
+	//
+	// // 4. Define your contour levels! 
+	// // 1-sigma drops to e^(-0.5)
+	// // 2-sigma drops to e^(-2.0)
+	// // 3-sigma drops to e^(-4.5)
+	//
+	// // Let's draw all 3 levels to make it look incredibly professional:
+	// double contours[3];
+	// contours[0] = peak_amplitude * std::exp(-4.5); // 3-sigma (widest, lowest)
+	// contours[1] = peak_amplitude * std::exp(-2.0); // 2-sigma
+	// contours[2] = peak_amplitude * std::exp(-0.5); // 1-sigma (tightest, highest)
+	//
+	// // 5. Apply the contours to your TF2
+	// // The arguments are: (number_of_levels, array_of_levels)
+	// gaus_2D->SetContour(3, contours);
+	//
+	// // 6. Make the contour lines stand out against the color map
+	// gaus_2D->SetLineColor(kRed);
+	// gaus_2D->SetLineWidth(2);
+	// gaus_2D->SetLineStyle(1); // Solid lines
+	//
+	// double sigma_x = gaus_2D->GetParameter(2);
+	// double sigma_y = gaus_2D->GetParameter(4);
+	//
+	// TString txt_sigma_x = Form("#sigma_{x} = %.2f mm", sigma_x);
+	// TString txt_sigma_y = Form("#sigma_{y} = %.2f mm", sigma_y);
+	//
+	// double offset = 10.0;
+	// TLatex* ltx_sigX = new TLatex(sigma_x - offset, sigma_y, txt_sigma_x);
+	// TLatex* ltx_sigY = new TLatex(sigma_x - offset, sigma_y - 5.0, txt_sigma_y);
+	//
+	// ltx_sigX->SetTextSize(0.04); ltx_sigX->SetTextColor(kBlack);
+	// ltx_sigY->SetTextSize(0.04); ltx_sigY->SetTextColor(kBlack);
+	//
+	// TLatex* contour_sigma = new TLatex(sigma_x - offset, -sigma_y + offset, "1#sigma");
+	// contour_sigma->SetTextSize(0.04); contour_sigma->SetTextColor(kBlack);
+	//
+	// hist->GetListOfFunctions()->Add(ltx_sigX);
+	// hist->GetListOfFunctions()->Add(ltx_sigY);
+	// hist->GetListOfFunctions()->Add(contour_sigma);
 
 
 	// for (int i = 0; i < 8; i++){

@@ -2,6 +2,10 @@
 
 This is the code to analyze the T5 detector using the matched VME + BRB data files of the WCTE experiment.
 
+## Dependencies
+
+To run the program, ROOT version 6.36.04 was used.
+
 ## How to run
 
 To run this code, compile it using the 

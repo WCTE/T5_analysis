@@ -20,8 +20,8 @@ class Cuts{
 	private:
 		RVecI T0_ids;
 		RVecI T1_ids;
-		RVecI HC_ids;
 		RVecI T4_ids;
+		RVecI HC_ids;
 		RVecI T5_ids;
 
 		int T5_board_id;

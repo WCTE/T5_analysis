@@ -129,7 +129,6 @@ event_T5_detection TOF_reconstructor::Return_position(const int event_nr,
 	}
 
 	std::set<int> unique_scints;
-	int n_scints_hit = 0;
 	int n_valid_hits = 0;
 
 	if (!(all_hits.size() < 1)) detection.HasHit = true;

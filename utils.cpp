@@ -74,7 +74,7 @@ bool Cuts::hit_T5(const RVecI& mpmt_ids, const RVecI& pmt_ids){
 	auto mask_board = (mpmt_ids == T5_board_id);
 	auto ids_filtered = pmt_ids[mask_board];
 	auto half_size = T5_ids.size()/2;
-	for (int i = 0; i < half_size; i++){
+	for (size_t i = 0; i < half_size; i++){
 		if (VecOps::Any(ids_filtered == T5_ids[i]) &&
 		    VecOps::Any(ids_filtered == T5_ids[i+half_size]))
 			return true;
@@ -171,11 +171,13 @@ void Histograms::fill(const std::string& name, double x, double y){
 void Histograms::draw(const std::string& name){
 	TString c_name = "c_" + name;
 	auto canvas = new TCanvas(c_name, c_name, m_canvas_default_size_x, m_canvas_default_size_y);
+	canvas->cd();
 	m_hists_map[name]->Draw("hist");
 }
 void Histograms::draw(const std::string& name, int c_size_x, int c_size_y){
 	TString c_name = "c_" + name;
 	auto canvas = new TCanvas(c_name, c_name, c_size_x, c_size_y);
+	canvas->cd();
 	m_hists_map[name]->Draw("hist");
 }
 void Histograms::print(const std::string& name){
