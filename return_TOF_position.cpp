@@ -80,7 +80,7 @@ event_T5_detection TOF_reconstructor::Return_position(const int event_nr,
 		for (const auto& sipm_time_a : T5_times[i]){
 			bool time_a_valid = (sipm_time_a < EXPECTED_DETECTION_TIME_MAX && sipm_time_a > EXPECTED_DETECTION_TIME_MIN);
 			for (const auto& sipm_time_b : T5_times[i+8]){
-				bool time_b_valid = (sipm_time_b < EXPECTED_DETECTION_TIME_MAX || sipm_time_b > EXPECTED_DETECTION_TIME_MIN);
+				bool time_b_valid = (sipm_time_b < EXPECTED_DETECTION_TIME_MAX && sipm_time_b > EXPECTED_DETECTION_TIME_MIN);
 				T5_hit hit;
 				hit.sipm_time_a = sipm_time_a;
 				hit.sipm_time_b = sipm_time_b;
