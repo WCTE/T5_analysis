@@ -185,6 +185,9 @@ int main(int argc, char **argv) {
     while (tree.Next()) {
       auto i = tree.GetCurrentEntry();
 
+      if (i >= n_events)
+        break;
+
       vector<double> vec_hit_time;
       vector<int> vec_hit_chan;
       vector<int> vec_hit_card;
