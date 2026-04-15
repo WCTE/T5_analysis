@@ -1,7 +1,8 @@
 plots/
 WCTE_data
 
-
+/*.jpg
+/*.png
 /*.o
 /*.root
 analyze_T5
