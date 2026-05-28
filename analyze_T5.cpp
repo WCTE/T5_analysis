@@ -123,6 +123,7 @@ int main(int argc, char **argv) {
         // vector<int>* arr_bm_charge_ids = nullptr;
 
         std::unique_ptr<TTreeReaderValue<vector<double>>> arr_pmt_times;
+        std::unique_ptr<TTreeReaderValue<vector<double>>> arr_pmt_charges;
         std::unique_ptr<TTreeReaderValue<vector<int>>> arr_pmt_ids;
         std::unique_ptr<TTreeReaderValue<vector<int>>> arr_mpmt_ids;
 
@@ -131,16 +132,20 @@ int main(int argc, char **argv) {
         const int MAX_HITS = 4000;
 
         std::unique_ptr<TTreeReaderValue<int>> n_pmt_times;
+        std::unique_ptr<TTreeReaderValue<int>> n_pmt_charges;
         std::unique_ptr<TTreeReaderValue<int>> n_pmt_chans;
         std::unique_ptr<TTreeReaderValue<int>> n_pmt_cards;
 
         std::unique_ptr<TTreeReaderArray<double>> processed_hit_times;
+        std::unique_ptr<TTreeReaderArray<double>> processed_hit_charges;
         std::unique_ptr<TTreeReaderArray<int>> processed_hit_cards;
         std::unique_ptr<TTreeReaderArray<int>> processed_hit_chans;
 
         if (hardware_processed_data) {
             n_pmt_times =
                 std::make_unique<TTreeReaderValue<int>>(tree, "nhit_time");
+            n_pmt_charges =
+                std::make_unique<TTreeReaderValue<int>>(tree, "nhit_charge");
             n_pmt_chans =
                 std::make_unique<TTreeReaderValue<int>>(tree, "nhit_chan");
             n_pmt_cards =
@@ -148,6 +153,8 @@ int main(int argc, char **argv) {
 
             processed_hit_times =
                 std::make_unique<TTreeReaderArray<double>>(tree, "hit_time");
+            processed_hit_charges =
+                std::make_unique<TTreeReaderArray<double>>(tree, "hit_charge");
             processed_hit_cards =
                 std::make_unique<TTreeReaderArray<int>>(tree, "hit_card");
             processed_hit_chans =
@@ -156,6 +163,9 @@ int main(int argc, char **argv) {
         } else {
             arr_pmt_times = std::make_unique<TTreeReaderValue<vector<double>>>(
                 tree, "hit_pmt_times");
+            arr_pmt_charges =
+                std::make_unique<TTreeReaderValue<vector<double>>>(
+                    tree, "hit_pmt_charges");
             arr_pmt_ids = std::make_unique<TTreeReaderValue<vector<int>>>(
                 tree, "hit_pmt_channel_ids");
             arr_mpmt_ids = std::make_unique<TTreeReaderValue<vector<int>>>(
@@ -198,6 +208,7 @@ int main(int argc, char **argv) {
                 break;
 
             vector<double> vec_hit_time;
+            vector<double> vec_hit_charge;
             vector<int> vec_hit_chan;
             vector<int> vec_hit_card;
             // Print progress
@@ -217,6 +228,8 @@ int main(int argc, char **argv) {
                 // change array output into std vectors
                 vec_hit_time.assign((*processed_hit_times).begin(),
                                     (*processed_hit_times).end());
+                vec_hit_charge.assign((*processed_hit_charges).begin(),
+                                      (*processed_hit_charges).end());
                 vec_hit_card.assign((*processed_hit_cards).begin(),
                                     (*processed_hit_cards).end());
                 vec_hit_chan.assign((*processed_hit_chans).begin(),
@@ -224,6 +237,8 @@ int main(int argc, char **argv) {
             } else {
                 vec_hit_time.assign((**arr_pmt_times).begin(),
                                     (**arr_pmt_times).end());
+                vec_hit_charge.assign((**arr_pmt_charges).begin(),
+                                      (**arr_pmt_charges).end());
                 vec_hit_card.assign((**arr_mpmt_ids).begin(),
                                     (**arr_mpmt_ids).end());
                 vec_hit_chan.assign((**arr_pmt_ids).begin(),
@@ -245,6 +260,7 @@ int main(int argc, char **argv) {
             // arr_bm_charges->size());
 
             RVecD pmt_times(vec_hit_time.data(), vec_hit_time.size());
+            RVecD pmt_charges(vec_hit_charge.data(), vec_hit_charge.size());
             RVecI pmt_ids(vec_hit_chan.data(), vec_hit_chan.size());
             RVecI mpmt_ids(vec_hit_card.data(), vec_hit_card.size());
 
@@ -261,7 +277,7 @@ int main(int argc, char **argv) {
             auto T5_board_times = pmt_times[mask_T5_board];
 
             detections = recon.Return_position(i, vec_hit_card, vec_hit_chan,
-                                               vec_hit_time);
+                                               vec_hit_time, vec_hit_charge);
 
             if (detections.HasValidHit)
                 n_T5_valid_events++;
@@ -457,113 +473,96 @@ int main(int argc, char **argv) {
         output_file->cd();
         TTree *output_tree = new TTree("T5_Events", "Reconstructed T5 events");
         // --- Single-value branches (per event) ---
-        int b_n_particles = 0;
+        int b_n_main_particles = 0;
         int b_event_nr = 0;
-        bool b_HasValidHit;
-        bool b_HasMultipleScintillatorsHit;
-        bool b_HasOutOfTimeWindow;
-        bool b_HasInTimeWindow;
+        double b_main_hit_time = 0;
+        double b_main_hit_charge = 0;
+        double b_main_position_x = 0;
+        double b_main_position_y = 0;
+        bool b_T5HitMask;
 
         output_tree->Branch("event_nr", &b_event_nr, "event_nr/I");
-        output_tree->Branch("T5_particle_nr", &b_n_particles,
-                            "T5_particle_nr/I");
-        output_tree->Branch("T5_HasValidHit", &b_HasValidHit,
-                            "T5_HasValidHit/O");
-        output_tree->Branch("T5_HasMultipleScintillatorsHit",
-                            &b_HasMultipleScintillatorsHit,
-                            "T5_HasMultipleScintillatorsHit/O");
-        output_tree->Branch("T5_HasOutOfTimeWindow", &b_HasOutOfTimeWindow,
-                            "T5_HasOutOfTimeWindow/O");
-        output_tree->Branch("T5_HasInTimeWindow", &b_HasInTimeWindow,
-                            "T5_HasInTimeWindow/O");
+        output_tree->Branch("T5_hit_mask", &b_T5HitMask, "T5_hit_mask/O");
+        output_tree->Branch("T5_n_main_bunch_particles", &b_n_main_particles,
+                            "T5_n_main_bunch_particles/I");
+        output_tree->Branch("T5_hit_time", &b_main_hit_time, "T5_hit_time/D");
+        output_tree->Branch("T5_hit_charge", &b_main_hit_charge,
+                            "T5_hit_charge/D");
+        output_tree->Branch("T5_hit_pos_x", &b_main_position_x,
+                            "T5_hit_pos_x/D");
+        output_tree->Branch("T5_hit_pos_y", &b_main_position_y,
+                            "T5_hit_pos_y/D");
 
         // --- Vector branches (multiple hits per event) ---
-        // Primary hits -- hits in the expected timeframe
-        std::vector<int> *b_hit_is_in_bounds = new std::vector<int>();
-        std::vector<double> *b_hit_pos_x = new std::vector<double>();
-        std::vector<double> *b_hit_pos_y = new std::vector<double>();
-        std::vector<double> *b_hit_time = new std::vector<double>();
+        // Additional hits -- Any hit other than the main hit
+        std::vector<double> *b_additional_hit_pos_x = new std::vector<double>();
+        std::vector<double> *b_additional_hit_pos_y = new std::vector<double>();
+        std::vector<double> *b_additional_hit_time = new std::vector<double>();
+        std::vector<double> *b_additional_hit_charge =
+            new std::vector<double>();
 
-        output_tree->Branch("T5_hit_is_in_bounds", &b_hit_is_in_bounds);
-        output_tree->Branch("T5_hit_pos_x", &b_hit_pos_x);
-        output_tree->Branch("T5_hit_pos_y", &b_hit_pos_y);
-        output_tree->Branch("T5_hit_time", &b_hit_time);
-
-        // Secondary hits -- hits outside of the main bunch
-        std::vector<bool> *b_secondary_hit_is_in_bounds =
-            new std::vector<bool>();
-        std::vector<double> *b_secondary_hit_pos_x = new std::vector<double>();
-        std::vector<double> *b_secondary_hit_pos_y = new std::vector<double>();
-        std::vector<double> *b_secondary_hit_time = new std::vector<double>();
-
-        output_tree->Branch("T5_secondary_hit_is_in_bounds",
-                            &b_secondary_hit_is_in_bounds);
-        output_tree->Branch("T5_secondary_hit_pos_x", &b_secondary_hit_pos_x);
-        output_tree->Branch("T5_secondary_hit_pos_y", &b_secondary_hit_pos_y);
-        output_tree->Branch("T5_secondary_hit_time", &b_secondary_hit_time);
+        output_tree->Branch("T5_additional_hit_pos_x", &b_additional_hit_pos_x);
+        output_tree->Branch("T5_additional_hit_pos_y", &b_additional_hit_pos_y);
+        output_tree->Branch("T5_additional_hit_time", &b_additional_hit_time);
+        output_tree->Branch("T5_additional_hit_charge",
+                            &b_additional_hit_charge);
 
         for (const auto &event : all_T5_hits) {
-            b_n_particles = 0;
             b_event_nr = event.event_nr;
-            b_HasValidHit = false;
-            b_HasMultipleScintillatorsHit = false;
-            b_HasOutOfTimeWindow = false;
-            b_HasInTimeWindow = false;
+            b_T5HitMask = false;
 
-            b_hit_is_in_bounds->clear();
-            b_hit_pos_x->clear();
-            b_hit_pos_y->clear();
-            b_hit_time->clear();
+            if (!event.IsClean || !event.HasInTimeWindow)
+                b_T5HitMask = true;
 
-            b_secondary_hit_is_in_bounds->clear();
-            b_secondary_hit_pos_x->clear();
-            b_secondary_hit_pos_y->clear();
-            b_secondary_hit_time->clear();
+            b_main_hit_charge = 0;
+            b_main_hit_time = 0;
+            b_main_position_x = 0;
+            b_main_position_y = 0;
+
+            b_additional_hit_time->clear();
+            b_additional_hit_charge->clear();
+            b_additional_hit_pos_x->clear();
+            b_additional_hit_pos_y->clear();
 
             if (!event.HasValidHit) {
                 output_tree->Fill();
                 continue;
             }
-            b_HasValidHit = event.HasValidHit;
-            b_HasMultipleScintillatorsHit = event.HasMultipleScintillatorsHit;
-            b_HasInTimeWindow = event.HasInTimeWindow;
-            b_HasOutOfTimeWindow = event.HasOutOfTimeWindow;
-
+            bool main_hit_happened = false;
             for (const auto &hit : event.T5_hits) {
                 if (hit.quality == HitQuality::AccidentalCoincidence)
                     continue;
-                if (hit.is_in_time_window) {
-                    b_hit_time->push_back(hit.hit_time);
-                    b_hit_pos_x->push_back(hit.position_x);
-                    b_hit_pos_y->push_back(hit.position_y);
-                    if (hit.quality == HitQuality::Perfect)
-                        b_hit_is_in_bounds->push_back(true);
-                    else
-                        b_hit_is_in_bounds->push_back(false);
-                } else {
-                    b_secondary_hit_time->push_back(hit.hit_time);
-                    b_secondary_hit_pos_x->push_back(hit.position_x);
-                    b_secondary_hit_pos_y->push_back(hit.position_y);
-                    if (hit.quality == HitQuality::Perfect)
-                        b_secondary_hit_is_in_bounds->push_back(true);
-                    else
-                        b_secondary_hit_is_in_bounds->push_back(false);
+                if (hit.is_in_time_window && !main_hit_happened) {
+                    b_main_hit_time = hit.raw_time;
+                    b_main_hit_charge = hit.hit_charge;
+                    b_main_position_x = hit.position_x;
+                    b_main_position_y = hit.position_y;
+                    b_n_main_particles++;
+                    main_hit_happened = true;
+                } else if (hit.is_in_time_window) {
+                    b_n_main_particles++;
+                    b_additional_hit_time->push_back(hit.raw_time);
+                    b_additional_hit_charge->push_back(hit.hit_charge);
+                    b_additional_hit_pos_x->push_back(hit.position_x);
+                    b_additional_hit_pos_y->push_back(hit.position_y);
                 }
-                b_n_particles++;
+
+                else {
+                    b_additional_hit_time->push_back(hit.raw_time);
+                    b_additional_hit_charge->push_back(hit.hit_charge);
+                    b_additional_hit_pos_x->push_back(hit.position_x);
+                    b_additional_hit_pos_y->push_back(hit.position_y);
+                }
             }
 
             output_tree->Fill();
         }
         output_tree->Write();
 
-        delete b_hit_time;
-        delete b_hit_pos_x;
-        delete b_hit_pos_y;
-        delete b_hit_is_in_bounds;
-        delete b_secondary_hit_time;
-        delete b_secondary_hit_pos_x;
-        delete b_secondary_hit_pos_y;
-        delete b_secondary_hit_is_in_bounds;
+        delete b_additional_hit_charge;
+        delete b_additional_hit_time;
+        delete b_additional_hit_pos_x;
+        delete b_additional_hit_pos_y;
 
         output_file->Close();
     }
