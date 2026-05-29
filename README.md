@@ -1,42 +1,84 @@
 # T5 detector analysis
 
-This is the code to analyze the T5 detector using the matched VME + BRB data files of the WCTE experiment.
+This project reconstructs T5 detector hits from WCTE input ROOT files and writes a simplified per-event ROOT tree for downstream analysis.
 
 ## Dependencies
 
-To run the program, ROOT version 6.36.04 was used.
+The code is built against ROOT 6 (the Makefile uses `root-config`).
 
-## How to run
+Typical setup:
 
-To run this code, compile it using the 
-```
+- ROOT 6.x
+- C++ compiler with C++17 support
+- GNU Make
+
+## Build
+
+From the project root:
+
+```sh
 make
 ```
-command, and run the analysis using 
+
+This produces the executable `analyze_T5`.
+
+## Usage
+
+The current executable accepts the following command-line options:
+
+```sh
+./analyze_T5 -r <run_number> -i <input_file.root> [-o <output_dir>] [-d]
 ```
-./analyze_T5 -r <run_number>
+
+Options:
+
+- `-r <run_number>`: required run number used for the analysis metadata.
+- `-i <input_file.root>`: input ROOT file to analyze. You can pass this option multiple times.
+- `-o <output_dir>`: output directory prefix used to write one reconstructed file per input file.
+- `-d`: enable debug mode (currently limits the event loop to the first 5000 entries).
+
+Example:
+
+```sh
+./analyze_T5 -r 1361 -i /path/to/run_1361.root -o output/
 ```
-command
 
-The program can take additional arguments, `-o` will modify the name of the output root file and output path, `-i` will modify, where the program searches for the files
+The program recognizes the following input trees:
 
-## Output file data structure
+- `ProcessedWaveforms`
+- `WCTEReadoutWindows`
 
-The root output file has the following structure:
+If neither tree is found, the program stops with an error.
 
-| Variable Name | Type | Description |
+## What the program does
+
+For each input file, the analysis:
+
+1. Opens the input ROOT file.
+2. Detects the appropriate TTree.
+3. Reconstructs T5 hits using the T5 SiPM timing information.
+4. Writes a new ROOT file containing a simplified event tree.
+
+## Output tree structure
+
+The output ROOT file contains one tree named `T5_Events` with the following branches:
+
+| Branch name | Type | Description |
 | :--- | :---: | :--- |
-| **event_nr** | `Int` | Unique identification number for the physics event. |
-| **T5_particle_nr** | `Int` | Total number of particles detected by T5 in this event -- both in and out of the main time window |
-| **T5_HasValidHit** | `Bool` | Flag indicating if a valid signal was recorded. |
-| **T5_HasMultipleScintillatorsHit** | `Bool` | True if the event had particles in the defined main time window going through more than one scintillator -- multiple particles in one bunch, or secondary particles created by interactions. |
-| **T5_HasOutOfTimeWindow** | `Bool` | Flag saying, if the event has hits falling outside the defined trigger window. |
-| **T5_HasInTimeWindow** | `Bool` | Flag saying, if the event has hits falling within the defined trigger window. |
-| **T5_hit_is_in_bounds** | `vector<int>` | Validation that the hit is within physical detector limits (1 = true, 0 = false). |
-| **T5_hit_pos_x** | `vector<float>` | X-coordinate of the hit in the T5 detector [mm]. |
-| **T5_hit_pos_y** | `vector<float>` | Y-coordinate of the primary hit in the T5 detector [mm]. |
-| **T5_hit_time** | `vector<float>` | Time measured by T5 for the primary hit. |
-| **T5_secondary_hit_is_in_bounds** | `vector<int>` | Says if the hit out of the main time window is in the scintillator T5_secondary_hit_is_in_bounds|
-| **T5_secondary_hit_pos_x** | `vector<float>` | X-coordinate of the secondary hit -- hit outside of the main time window |
-| **T5_secondary_hit_pos_y** | `vector<float>` | Y-coordinate of the secondary hit -- hit outside of the main time window |
-| **T5_secondary_hit_time** | `vector<float>` | Time measured by T5 for the secondary hit -- hit outside of the main time window |
+| `event_nr` | `Int_t` | Event number from the input tree |
+| `T5_hit_mask` | `Bool_t` | Flag indicating whether the event is considered problematic / not clean |
+| `T5_n_main_bunch_particles` | `Int_t` | Number of reconstructed main-bunch hits written for this event |
+| `T5_hit_time` | `Double_t` | Time of the primary reconstructed hit |
+| `T5_hit_charge` | `Double_t` | Charge of the primary reconstructed hit |
+| `T5_hit_pos_x` | `Double_t` | Reconstructed x position of the primary hit [mm] |
+| `T5_hit_pos_y` | `Double_t` | Reconstructed y position of the primary hit [mm] |
+| `T5_additional_hit_pos_x` | `vector<double>` | x positions of additional reconstructed hits |
+| `T5_additional_hit_pos_y` | `vector<double>` | y positions of additional reconstructed hits |
+| `T5_additional_hit_time` | `vector<double>` | Times of additional reconstructed hits |
+| `T5_additional_hit_charge` | `vector<double>` | Charges of additional reconstructed hits |
+
+## Notes
+
+- The program currently writes one output file per input file, using the input file basename with `_T5.root` appended.
+- The output directory path passed to `-o` is used as the base location for those generated files.
+- The reconstruction logic is implemented mainly in `return_TOF_position.cpp` and uses the detector geometry constants defined in `return_TOF_position.h`.

@@ -211,8 +211,9 @@ int main(int argc, char **argv) {
             vector<double> vec_hit_charge;
             vector<int> vec_hit_chan;
             vector<int> vec_hit_card;
-            // Print progress
+
             event_T5_detection detections;
+
             if (hardware_processed_data) {
                 if (**n_pmt_times >= MAX_HITS) {
                     // continue and push back dummy
@@ -272,9 +273,9 @@ int main(int argc, char **argv) {
 
             n_pass_cut++;
 
-            auto mask_T5_board = (mpmt_ids == cut.get_T5_board());
-            auto T5_board_ids = pmt_ids[mask_T5_board];
-            auto T5_board_times = pmt_times[mask_T5_board];
+            // auto mask_T5_board = (mpmt_ids == cut.get_T5_board());
+            // auto T5_board_ids = pmt_ids[mask_T5_board];
+            // auto T5_board_times = pmt_times[mask_T5_board];
 
             detections = recon.Return_position(i, vec_hit_card, vec_hit_chan,
                                                vec_hit_time, vec_hit_charge);
@@ -296,12 +297,6 @@ int main(int argc, char **argv) {
             if (detections.HasOutOfBounds)
                 n_events_out_of_bounds++;
 
-            int n_hits_in_T5_in_single_event = 0;
-            for (size_t j = 0; j < cut.Get_T5_ids().size(); j++) {
-                auto T5_id = cut.Get_T5_ids().at(j);
-                int sum_hits_T5_i = VecOps::Sum(T5_board_ids == T5_id);
-                n_hits_in_T5_in_single_event += sum_hits_T5_i;
-            }
             all_T5_hits.push_back(detections);
         }
 
@@ -358,7 +353,9 @@ int main(int argc, char **argv) {
             if (!event.IsClean || !event.HasInTimeWindow)
                 b_T5HitMask = true;
 
+            b_n_main_particles = 0;
             b_main_hit_charge = 0;
+            
             b_main_hit_time = 0;
             b_main_position_x = 0;
             b_main_position_y = 0;
@@ -409,7 +406,7 @@ int main(int argc, char **argv) {
         delete b_additional_hit_pos_y;
 
         output_file->Close();
-    }
+    } // end loop over input files
 
     return 0;
 }
