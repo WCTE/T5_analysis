@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <array>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -34,6 +37,39 @@ using std::string;
 using std::vector;
 
 using namespace ROOT;
+
+namespace {
+
+void write_mask_summary_csv(const std::string &summary_path, int run_number,
+                            const std::string &input_file,
+                            long long total_events, long long good_events,
+                            long long suspicious_events) {
+    const bool file_exists = std::ifstream(summary_path).good();
+    std::ofstream summary_file(summary_path,
+                               std::ios::out | std::ios::app);
+    if (!summary_file.is_open()) {
+        std::cerr << "ERROR: Could not open summary CSV: " << summary_path
+                  << std::endl;
+        return;
+    }
+
+    if (!file_exists) {
+        summary_file
+            << "run_number,input_file,total_events,good_events,good_fraction_pct,"
+               "events_with_multiple_main_window_hits_on_same_scintillator\n";
+    }
+
+    const double good_fraction_pct =
+        total_events > 0 ? (100.0 * good_events) / total_events : 0.0;
+
+    summary_file << run_number << ',' << input_file << ',' << total_events
+                 << ',' << good_events << ',' << std::fixed
+                 << std::setprecision(3) << good_fraction_pct << ','
+                 << suspicious_events << '\n';
+    summary_file.close();
+}
+
+} // namespace
 
 int main(int argc, char **argv) {
 
@@ -84,7 +120,10 @@ int main(int argc, char **argv) {
         TString base_name = gSystem->BaseName(filename);
         base_name.ReplaceAll(".root", "_T5.root");
 
-        current_output_path = output_path + "/" + base_name;
+        if (!current_output_path.EndsWith("/")) {
+            current_output_path += "/";
+        }
+        current_output_path = output_path + base_name;
 
         auto file = TFile::Open(filename, "READ");
 
@@ -123,7 +162,7 @@ int main(int argc, char **argv) {
         // vector<int>* arr_bm_charge_ids = nullptr;
 
         std::unique_ptr<TTreeReaderValue<vector<double>>> arr_pmt_times;
-        std::unique_ptr<TTreeReaderValue<vector<double>>> arr_pmt_charges;
+        std::unique_ptr<TTreeReaderValue<vector<float>>> arr_pmt_charges;
         std::unique_ptr<TTreeReaderValue<vector<int>>> arr_pmt_ids;
         std::unique_ptr<TTreeReaderValue<vector<int>>> arr_mpmt_ids;
 
@@ -137,7 +176,7 @@ int main(int argc, char **argv) {
         std::unique_ptr<TTreeReaderValue<int>> n_pmt_cards;
 
         std::unique_ptr<TTreeReaderArray<double>> processed_hit_times;
-        std::unique_ptr<TTreeReaderArray<double>> processed_hit_charges;
+        std::unique_ptr<TTreeReaderArray<float>> processed_hit_charges;
         std::unique_ptr<TTreeReaderArray<int>> processed_hit_cards;
         std::unique_ptr<TTreeReaderArray<int>> processed_hit_chans;
 
@@ -154,7 +193,7 @@ int main(int argc, char **argv) {
             processed_hit_times =
                 std::make_unique<TTreeReaderArray<double>>(tree, "hit_time");
             processed_hit_charges =
-                std::make_unique<TTreeReaderArray<double>>(tree, "hit_charge");
+                std::make_unique<TTreeReaderArray<float>>(tree, "hit_charge");
             processed_hit_cards =
                 std::make_unique<TTreeReaderArray<int>>(tree, "hit_card");
             processed_hit_chans =
@@ -164,7 +203,7 @@ int main(int argc, char **argv) {
             arr_pmt_times = std::make_unique<TTreeReaderValue<vector<double>>>(
                 tree, "hit_pmt_times");
             arr_pmt_charges =
-                std::make_unique<TTreeReaderValue<vector<double>>>(
+                std::make_unique<TTreeReaderValue<vector<float>>>(
                     tree, "hit_pmt_charges");
             arr_pmt_ids = std::make_unique<TTreeReaderValue<vector<int>>>(
                 tree, "hit_pmt_channel_ids");
@@ -186,7 +225,10 @@ int main(int argc, char **argv) {
         // setup_histograms(hists, recon);
         int n_pass_cut = 0;
         int n_T5_valid_events = 0;
-        auto n_events = tree.GetEntries();
+        long long total_events = tree.GetEntries();
+        long long good_events = 0;
+        long long suspicious_main_window_events = 0;
+        auto n_events = total_events;
         if (debug) {
             cout << "Debug mode enabled: limiting to 5000 events" << endl;
             n_events = std::min(n_events, 5000LL);
@@ -280,6 +322,30 @@ int main(int argc, char **argv) {
             detections = recon.Return_position(i, vec_hit_card, vec_hit_chan,
                                                vec_hit_time, vec_hit_charge);
 
+            std::array<int, 8> main_window_hits_per_scintillator = {};
+            for (const auto &hit : detections.T5_hits) {
+                if (hit.is_in_time_window && hit.is_valid_hit &&
+                    hit.scintillator_id >= 0 &&
+                    hit.scintillator_id < static_cast<int>(main_window_hits_per_scintillator.size())) {
+                    ++main_window_hits_per_scintillator[hit.scintillator_id];
+                }
+            }
+            const bool has_multiple_hits_on_same_scintillator =
+                std::any_of(main_window_hits_per_scintillator.begin(),
+                            main_window_hits_per_scintillator.end(),
+                            [](int count) { return count > 1; });
+            if (has_multiple_hits_on_same_scintillator) {
+                ++suspicious_main_window_events;
+                std::cerr << "WARNING: event " << i
+                          << " has multiple main-window hits on the same "
+                             "scintillator; review the reconstruction output."
+                          << std::endl;
+            }
+
+            if (detections.IsClean && detections.HasInTimeWindow) {
+                ++good_events;
+            }
+
             if (detections.HasValidHit)
                 n_T5_valid_events++;
             if (detections.HasMultipleValidHits) {
@@ -302,15 +368,42 @@ int main(int argc, char **argv) {
 
         file->Close();
 
-        TFile *output_file = TFile::Open(current_output_path, "RECREATE");
-        if (!output_file || output_file->IsZombie()) {
-            cerr << "ERROR: Did not open output file: " << current_output_path
-                 << endl;
-            continue;
+        // ROOT output-file writing is disabled for file-by-file Python-driven
+        // analysis runs that only need the summary statistics.
+        // TFile *output_file = TFile::Open(current_output_path, "RECREATE");
+        // if (!output_file || output_file->IsZombie()) {
+        //     cerr << "ERROR: Did not open output file: " << current_output_path
+        //          << endl;
+        //     continue;
+        // }
+
+        // output_file->cd();
+        TH1D *h_main_window_hits_per_scintillator =
+            new TH1D("T5_main_window_hits_per_scintillator",
+                     "Main-window hits per scintillator;Scintillator ID;Count",
+                     8, -0.5, 7.5);
+        TH1D *h_suspicious_events =
+            new TH1D("T5_suspicious_multi_hits_same_scintillator",
+                     "Events with >1 main-window hit on the same scintillator;"
+                     "Event count;Entries",
+                     2, -0.5, 1.5);
+        h_suspicious_events->SetBinContent(2, suspicious_main_window_events);
+        h_suspicious_events->SetBinContent(1, total_events - suspicious_main_window_events);
+
+        for (const auto &event : all_T5_hits) {
+            for (const auto &hit : event.T5_hits) {
+                if (hit.is_in_time_window && hit.is_valid_hit &&
+                    hit.scintillator_id >= 0 &&
+                    hit.scintillator_id < 8) {
+                    h_main_window_hits_per_scintillator->Fill(hit.scintillator_id);
+                }
+            }
         }
 
-        output_file->cd();
-        TTree *output_tree = new TTree("T5_Events", "Reconstructed T5 events");
+        // h_main_window_hits_per_scintillator->Write();
+        // h_suspicious_events->Write();
+
+        // TTree *output_tree = new TTree("T5_Events", "Reconstructed T5 events");
         // --- Single-value branches (per event) ---
         int b_n_main_particles = 0;
         int b_event_nr = 0;
@@ -320,17 +413,17 @@ int main(int argc, char **argv) {
         double b_main_position_y = 0;
         bool b_T5HitMask;
 
-        output_tree->Branch("event_nr", &b_event_nr, "event_nr/I");
-        output_tree->Branch("T5_hit_mask", &b_T5HitMask, "T5_hit_mask/O");
-        output_tree->Branch("T5_n_main_bunch_particles", &b_n_main_particles,
-                            "T5_n_main_bunch_particles/I");
-        output_tree->Branch("T5_hit_time", &b_main_hit_time, "T5_hit_time/D");
-        output_tree->Branch("T5_hit_charge", &b_main_hit_charge,
-                            "T5_hit_charge/D");
-        output_tree->Branch("T5_hit_pos_x", &b_main_position_x,
-                            "T5_hit_pos_x/D");
-        output_tree->Branch("T5_hit_pos_y", &b_main_position_y,
-                            "T5_hit_pos_y/D");
+        // output_tree->Branch("event_nr", &b_event_nr, "event_nr/I");
+        // output_tree->Branch("T5_hit_mask", &b_T5HitMask, "T5_hit_mask/O");
+        // output_tree->Branch("T5_n_main_bunch_particles", &b_n_main_particles,
+        //                     "T5_n_main_bunch_particles/I");
+        // output_tree->Branch("T5_hit_time", &b_main_hit_time, "T5_hit_time/D");
+        // output_tree->Branch("T5_hit_charge", &b_main_hit_charge,
+        //                     "T5_hit_charge/D");
+        // output_tree->Branch("T5_hit_pos_x", &b_main_position_x,
+        //                     "T5_hit_pos_x/D");
+        // output_tree->Branch("T5_hit_pos_y", &b_main_position_y,
+        //                     "T5_hit_pos_y/D");
 
         // --- Vector branches (multiple hits per event) ---
         // Additional hits -- Any hit other than the main hit
@@ -339,12 +432,19 @@ int main(int argc, char **argv) {
         std::vector<double> *b_additional_hit_time = new std::vector<double>();
         std::vector<double> *b_additional_hit_charge =
             new std::vector<double>();
+        std::vector<int> *b_main_hit_scintillator_id = new std::vector<int>();
+        std::vector<int> *b_additional_hit_scintillator_id =
+            new std::vector<int>();
 
-        output_tree->Branch("T5_additional_hit_pos_x", &b_additional_hit_pos_x);
-        output_tree->Branch("T5_additional_hit_pos_y", &b_additional_hit_pos_y);
-        output_tree->Branch("T5_additional_hit_time", &b_additional_hit_time);
-        output_tree->Branch("T5_additional_hit_charge",
-                            &b_additional_hit_charge);
+        // output_tree->Branch("T5_additional_hit_pos_x", &b_additional_hit_pos_x);
+        // output_tree->Branch("T5_additional_hit_pos_y", &b_additional_hit_pos_y);
+        // output_tree->Branch("T5_additional_hit_time", &b_additional_hit_time);
+        // output_tree->Branch("T5_additional_hit_charge",
+        //                     &b_additional_hit_charge);
+        // output_tree->Branch("T5_hit_scintillator_id",
+        //                     &b_main_hit_scintillator_id);
+        // output_tree->Branch("T5_additional_hit_scintillator_id",
+        //                     &b_additional_hit_scintillator_id);
 
         for (const auto &event : all_T5_hits) {
             b_event_nr = event.event_nr;
@@ -364,9 +464,11 @@ int main(int argc, char **argv) {
             b_additional_hit_charge->clear();
             b_additional_hit_pos_x->clear();
             b_additional_hit_pos_y->clear();
+            b_main_hit_scintillator_id->clear();
+            b_additional_hit_scintillator_id->clear();
 
             if (!event.HasValidHit) {
-                output_tree->Fill();
+                // output_tree->Fill();
                 continue;
             }
             bool main_hit_happened = false;
@@ -378,6 +480,7 @@ int main(int argc, char **argv) {
                     b_main_hit_charge = hit.hit_charge;
                     b_main_position_x = hit.position_x;
                     b_main_position_y = hit.position_y;
+                    b_main_hit_scintillator_id->push_back(hit.scintillator_id);
                     b_n_main_particles++;
                     main_hit_happened = true;
                 } else if (hit.is_in_time_window) {
@@ -386,6 +489,7 @@ int main(int argc, char **argv) {
                     b_additional_hit_charge->push_back(hit.hit_charge);
                     b_additional_hit_pos_x->push_back(hit.position_x);
                     b_additional_hit_pos_y->push_back(hit.position_y);
+                    b_additional_hit_scintillator_id->push_back(hit.scintillator_id);
                 }
 
                 else {
@@ -393,19 +497,27 @@ int main(int argc, char **argv) {
                     b_additional_hit_charge->push_back(hit.hit_charge);
                     b_additional_hit_pos_x->push_back(hit.position_x);
                     b_additional_hit_pos_y->push_back(hit.position_y);
+                    b_additional_hit_scintillator_id->push_back(hit.scintillator_id);
                 }
             }
 
-            output_tree->Fill();
+            // output_tree->Fill();
         }
-        output_tree->Write();
+        // output_tree->Write();
 
         delete b_additional_hit_charge;
         delete b_additional_hit_time;
         delete b_additional_hit_pos_x;
         delete b_additional_hit_pos_y;
+        delete b_main_hit_scintillator_id;
+        delete b_additional_hit_scintillator_id;
 
-        output_file->Close();
+        write_mask_summary_csv((std::string(current_output_path.Data()) +
+                                    ".summary.csv"),
+                               run_number, filename.Data(), total_events,
+                               good_events, suspicious_main_window_events);
+
+        // output_file->Close();
     } // end loop over input files
 
     return 0;
