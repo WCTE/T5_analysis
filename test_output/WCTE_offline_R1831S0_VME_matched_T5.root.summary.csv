@@ -1,2 +1,0 @@
-run_number,input_file,total_events,good_events,good_fraction_pct,events_with_multiple_main_window_hits_on_same_scintillator
-1831,/eos/experiment/wcte/data/2025_commissioning/offline_data_vme_match/WCTE_offline_R1831S0_VME_matched.root,911138,19762,2.169,0

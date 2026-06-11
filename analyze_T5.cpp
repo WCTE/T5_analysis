@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -43,10 +44,11 @@ namespace {
 void write_mask_summary_csv(const std::string &summary_path, int run_number,
                             const std::string &input_file,
                             long long total_events, long long good_events,
-                            long long suspicious_events) {
+                            long long suspicious_events,
+                            long long unclean_events, long long empty_events,
+                            long long OutOfBoundEvents) {
     const bool file_exists = std::ifstream(summary_path).good();
-    std::ofstream summary_file(summary_path,
-                               std::ios::out | std::ios::app);
+    std::ofstream summary_file(summary_path);
     if (!summary_file.is_open()) {
         std::cerr << "ERROR: Could not open summary CSV: " << summary_path
                   << std::endl;
@@ -55,8 +57,11 @@ void write_mask_summary_csv(const std::string &summary_path, int run_number,
 
     if (!file_exists) {
         summary_file
-            << "run_number,input_file,total_events,good_events,good_fraction_pct,"
-               "events_with_multiple_main_window_hits_on_same_scintillator\n";
+            << "run_number,input_file,total_events,good_events,good_fraction_"
+               "pct,"
+               "events_with_multiple_main_window_hits_on_same_scintillator,"
+               "unclean_events(>1 hit in main time window),empty_events(no hit "
+               "in main time window),main_events_OutOfBounds\n";
     }
 
     const double good_fraction_pct =
@@ -65,7 +70,8 @@ void write_mask_summary_csv(const std::string &summary_path, int run_number,
     summary_file << run_number << ',' << input_file << ',' << total_events
                  << ',' << good_events << ',' << std::fixed
                  << std::setprecision(3) << good_fraction_pct << ','
-                 << suspicious_events << '\n';
+                 << suspicious_events << ',' << unclean_events << ','
+                 << empty_events << ',' << OutOfBoundEvents << '\n';
     summary_file.close();
 }
 
@@ -202,9 +208,8 @@ int main(int argc, char **argv) {
         } else {
             arr_pmt_times = std::make_unique<TTreeReaderValue<vector<double>>>(
                 tree, "hit_pmt_times");
-            arr_pmt_charges =
-                std::make_unique<TTreeReaderValue<vector<float>>>(
-                    tree, "hit_pmt_charges");
+            arr_pmt_charges = std::make_unique<TTreeReaderValue<vector<float>>>(
+                tree, "hit_pmt_charges");
             arr_pmt_ids = std::make_unique<TTreeReaderValue<vector<int>>>(
                 tree, "hit_pmt_channel_ids");
             arr_mpmt_ids = std::make_unique<TTreeReaderValue<vector<int>>>(
@@ -241,6 +246,10 @@ int main(int argc, char **argv) {
         int n_invalid_hits = 0;
         int n_events_out_of_bounds = 0;
 
+        int n_clean_events = 0;
+        int n_empty_events = 0;
+        int n_unclean_events = 0;
+
         vector<event_T5_detection> all_T5_hits;
 
         while (tree.Next()) {
@@ -269,23 +278,24 @@ int main(int argc, char **argv) {
                     continue;
                 }
                 // change array output into std vectors
-                vec_hit_time.assign((*processed_hit_times).begin(),
-                                    (*processed_hit_times).end());
-                vec_hit_charge.assign((*processed_hit_charges).begin(),
-                                      (*processed_hit_charges).end());
-                vec_hit_card.assign((*processed_hit_cards).begin(),
-                                    (*processed_hit_cards).end());
-                vec_hit_chan.assign((*processed_hit_chans).begin(),
-                                    (*processed_hit_chans).end());
+                for (int j = 0; j < **n_pmt_times; j++) {
+                    if ((*processed_hit_cards)[j] == T5_CONFIG::T5_MPMT_ID) {
+                        vec_hit_time.push_back((*processed_hit_times)[j]);
+                        vec_hit_charge.push_back((*processed_hit_charges)[j]);
+                        vec_hit_card.push_back((*processed_hit_cards)[j]);
+                        vec_hit_chan.push_back((*processed_hit_chans)[j]);
+                    }
+                }
             } else {
-                vec_hit_time.assign((**arr_pmt_times).begin(),
-                                    (**arr_pmt_times).end());
-                vec_hit_charge.assign((**arr_pmt_charges).begin(),
-                                      (**arr_pmt_charges).end());
-                vec_hit_card.assign((**arr_mpmt_ids).begin(),
-                                    (**arr_mpmt_ids).end());
-                vec_hit_chan.assign((**arr_pmt_ids).begin(),
-                                    (**arr_pmt_ids).end());
+                auto &cards = (**arr_mpmt_ids);
+                for (int j = 0; j < cards.size(); j++) {
+                    if (cards[j] == T5_CONFIG::T5_MPMT_ID) {
+                        vec_hit_time.push_back((**arr_pmt_times)[j]);
+                        vec_hit_charge.push_back((**arr_pmt_charges)[j]);
+                        vec_hit_card.push_back((**arr_mpmt_ids)[j]);
+                        vec_hit_chan.push_back((**arr_pmt_ids)[j]);
+                    }
+                }
             }
 
             if (i % verb == 0)
@@ -301,9 +311,11 @@ int main(int argc, char **argv) {
             // bm_times(arr_bm_times->data(), arr_bm_times->size());
             // RVecF bm_charges(arr_bm_charges->data(),
             // arr_bm_charges->size());
-
-            RVecD pmt_times(vec_hit_time.data(), vec_hit_time.size());
-            RVecD pmt_charges(vec_hit_charge.data(), vec_hit_charge.size());
+            if (vec_hit_card.empty()) {
+                detections.event_nr = i;
+                all_T5_hits.push_back(detections);
+                continue;
+            }
             RVecI pmt_ids(vec_hit_chan.data(), vec_hit_chan.size());
             RVecI mpmt_ids(vec_hit_card.data(), vec_hit_card.size());
 
@@ -313,7 +325,7 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            n_pass_cut++;
+            // n_pass_cut++;
 
             // auto mask_T5_board = (mpmt_ids == cut.get_T5_board());
             // auto T5_board_ids = pmt_ids[mask_T5_board];
@@ -323,10 +335,15 @@ int main(int argc, char **argv) {
                                                vec_hit_time, vec_hit_charge);
 
             std::array<int, 8> main_window_hits_per_scintillator = {};
+            int n_main_window_hits = 0;
             for (const auto &hit : detections.T5_hits) {
+                if (hit.is_in_time_window)
+                    n_main_window_hits++;
                 if (hit.is_in_time_window && hit.is_valid_hit &&
                     hit.scintillator_id >= 0 &&
-                    hit.scintillator_id < static_cast<int>(main_window_hits_per_scintillator.size())) {
+                    hit.scintillator_id <
+                        static_cast<int>(
+                            main_window_hits_per_scintillator.size())) {
                     ++main_window_hits_per_scintillator[hit.scintillator_id];
                 }
             }
@@ -341,10 +358,26 @@ int main(int argc, char **argv) {
                              "scintillator; review the reconstruction output."
                           << std::endl;
             }
+            // cout << "Event " << i << " Diagnostics: " << endl;
+            // cout << "\tnumber of main window hits: " << n_main_window_hits
+            //      << endl;
+            if (detections.IsClean) {
+                n_clean_events++;
+                // cout << "\tevent is clean" << endl;
+            }
+            // if (detections.HasInTimeWindow)
+            //     cout << "\tevent has a main time window hit" << endl;
+            // else if (!detections.HasInTimeWindow)
+            //     cout << "\tevent does not have a main time window hit" <<
+            //     endl;
 
             if (detections.IsClean && detections.HasInTimeWindow) {
                 ++good_events;
             }
+            if (n_main_window_hits == 0)
+                n_empty_events++;
+            if (n_main_window_hits > 1)
+                n_unclean_events++;
 
             if (detections.HasValidHit)
                 n_T5_valid_events++;
@@ -366,158 +399,217 @@ int main(int argc, char **argv) {
             all_T5_hits.push_back(detections);
         }
 
+        cout << "Run " << RUN_NUMBER << " Diagnostics: " << endl;
+        cout << "\t" << n_events << " total events" << endl;
+        cout << "\t" << n_clean_events << " events were clean" << endl;
+        cout << "\t" << n_unclean_events
+             << " events were unclean (more than 1 hit in main time window)"
+             << endl;
+        cout << "\t" << n_empty_events
+             << " events were empty (no hit in main time window)" << endl;
+
         file->Close();
 
         // ROOT output-file writing is disabled for file-by-file Python-driven
         // analysis runs that only need the summary statistics.
-        // TFile *output_file = TFile::Open(current_output_path, "RECREATE");
-        // if (!output_file || output_file->IsZombie()) {
-        //     cerr << "ERROR: Did not open output file: " << current_output_path
-        //          << endl;
-        //     continue;
-        // }
+        TFile *output_file = TFile::Open(current_output_path, "RECREATE");
+        if (!output_file || output_file->IsZombie()) {
+            cerr << "ERROR: Did not open output file: " << current_output_path
+                 << endl;
+            continue;
+        }
 
         // output_file->cd();
-        TH1D *h_main_window_hits_per_scintillator =
-            new TH1D("T5_main_window_hits_per_scintillator",
-                     "Main-window hits per scintillator;Scintillator ID;Count",
-                     8, -0.5, 7.5);
-        TH1D *h_suspicious_events =
-            new TH1D("T5_suspicious_multi_hits_same_scintillator",
-                     "Events with >1 main-window hit on the same scintillator;"
-                     "Event count;Entries",
-                     2, -0.5, 1.5);
-        h_suspicious_events->SetBinContent(2, suspicious_main_window_events);
-        h_suspicious_events->SetBinContent(1, total_events - suspicious_main_window_events);
+        // TH1D *h_main_window_hits_per_scintillator =
+        //     new TH1D("T5_main_window_hits_per_scintillator",
+        //              "Main-window hits per scintillator;Scintillator
+        //              ID;Count", 8, -0.5, 7.5);
+        // TH1D *h_suspicious_events =
+        //     new TH1D("T5_suspicious_multi_hits_same_scintillator",
+        //              "Events with >1 main-window hit on the same
+        //              scintillator;" "Event count;Entries", 2, -0.5, 1.5);
+        // h_suspicious_events->SetBinContent(2, suspicious_main_window_events);
+        // h_suspicious_events->SetBinContent(
+        //     1, total_events - suspicious_main_window_events);
 
-        for (const auto &event : all_T5_hits) {
-            for (const auto &hit : event.T5_hits) {
-                if (hit.is_in_time_window && hit.is_valid_hit &&
-                    hit.scintillator_id >= 0 &&
-                    hit.scintillator_id < 8) {
-                    h_main_window_hits_per_scintillator->Fill(hit.scintillator_id);
-                }
-            }
-        }
+        // for (const auto &event : all_T5_hits) {
+        //     for (const auto &hit : event.T5_hits) {
+        //         if (hit.is_in_time_window && hit.is_valid_hit &&
+        //             hit.scintillator_id >= 0 && hit.scintillator_id < 8) {
+        //             h_main_window_hits_per_scintillator->Fill(
+        //                 hit.scintillator_id);
+        //         }
+        //     }
+        // }
 
         // h_main_window_hits_per_scintillator->Write();
         // h_suspicious_events->Write();
 
-        // TTree *output_tree = new TTree("T5_Events", "Reconstructed T5 events");
+        TTree *output_tree = new TTree("T5_Events", "Reconstructed T5 events");
         // --- Single-value branches (per event) ---
         int b_n_main_particles = 0;
         int b_event_nr = 0;
-        double b_main_hit_time = 0;
-        double b_main_hit_charge = 0;
-        double b_main_position_x = 0;
-        double b_main_position_y = 0;
-        bool b_T5HitMask;
+        double b_main_hit_time = -9999;
+        double b_main_hit_charge = -9999;
+        double b_main_position_x = -9999;
+        double b_main_position_y = -9999;
+        double b_main_position_x_error = -9999;
+        double b_main_position_y_error = -9999;
+        // int b_main_hit_scint_ID = -9999;
+        int b_T5_hit_bitmask;
 
-        // output_tree->Branch("event_nr", &b_event_nr, "event_nr/I");
-        // output_tree->Branch("T5_hit_mask", &b_T5HitMask, "T5_hit_mask/O");
-        // output_tree->Branch("T5_n_main_bunch_particles", &b_n_main_particles,
-        //                     "T5_n_main_bunch_particles/I");
-        // output_tree->Branch("T5_hit_time", &b_main_hit_time, "T5_hit_time/D");
-        // output_tree->Branch("T5_hit_charge", &b_main_hit_charge,
-        //                     "T5_hit_charge/D");
-        // output_tree->Branch("T5_hit_pos_x", &b_main_position_x,
-        //                     "T5_hit_pos_x/D");
-        // output_tree->Branch("T5_hit_pos_y", &b_main_position_y,
-        //                     "T5_hit_pos_y/D");
+        // Diagnostics
+
+        int n_main_OutOfBounds = 0;
+
+        output_tree->Branch("event_nr", &b_event_nr, "event_nr/I");
+        output_tree->Branch("t5_hit_bitmask", &b_T5_hit_bitmask,
+                            "t5_hit_bitmask/I");
+        output_tree->Branch("t5_n_main_bunch_particles", &b_n_main_particles,
+                            "t5_n_main_bunch_particles/I");
+        output_tree->Branch("t5_main_hit_time", &b_main_hit_time,
+                            "t5_main_hit_time/D");
+        output_tree->Branch("t5_main_hit_charge", &b_main_hit_charge,
+                            "t5_main_hit_charge/D");
+        output_tree->Branch("t5_main_hit_pos_x", &b_main_position_x,
+                            "t5_main_hit_pos_x/D");
+        output_tree->Branch("t5_main_hit_pos_y", &b_main_position_y,
+                            "t5_main_hit_pos_y/D");
+        output_tree->Branch("t5_main_hit_pos_x_error", &b_main_position_x_error,
+                            "t5_main_hit_pos_x_error/D");
+        output_tree->Branch("t5_main_hit_pos_y_error", &b_main_position_y_error,
+                            "t5_main_hit_pos_y_error/D");
+        // output_tree->Branch("t5_main_hit_scint_id", &b_main_hit_scint_ID,
+        //                     "t5_main_hit_scint_id/I");
 
         // --- Vector branches (multiple hits per event) ---
-        // Additional hits -- Any hit other than the main hit
-        std::vector<double> *b_additional_hit_pos_x = new std::vector<double>();
-        std::vector<double> *b_additional_hit_pos_y = new std::vector<double>();
-        std::vector<double> *b_additional_hit_time = new std::vector<double>();
-        std::vector<double> *b_additional_hit_charge =
-            new std::vector<double>();
-        std::vector<int> *b_main_hit_scintillator_id = new std::vector<int>();
-        std::vector<int> *b_additional_hit_scintillator_id =
-            new std::vector<int>();
+        // All hits -- Any hit other and including the main hit
+        std::vector<double> *b_all_hits_pos_x = new std::vector<double>();
+        std::vector<double> *b_all_hits_pos_y = new std::vector<double>();
+        std::vector<double> *b_all_hits_pos_x_error = new std::vector<double>();
+        std::vector<double> *b_all_hits_pos_y_error = new std::vector<double>();
+        std::vector<double> *b_all_hits_time = new std::vector<double>();
+        std::vector<double> *b_all_hits_charge = new std::vector<double>();
+        // std::vector<int> *b_all_hits_scintillator_id = new
+        // std::vector<int>();
+        vector<int> *b_all_hits_is_in_time_window = new std::vector<int>();
+        vector<int> *b_all_hits_is_in_bounds = new std::vector<int>();
 
-        // output_tree->Branch("T5_additional_hit_pos_x", &b_additional_hit_pos_x);
-        // output_tree->Branch("T5_additional_hit_pos_y", &b_additional_hit_pos_y);
-        // output_tree->Branch("T5_additional_hit_time", &b_additional_hit_time);
-        // output_tree->Branch("T5_additional_hit_charge",
-        //                     &b_additional_hit_charge);
-        // output_tree->Branch("T5_hit_scintillator_id",
-        //                     &b_main_hit_scintillator_id);
-        // output_tree->Branch("T5_additional_hit_scintillator_id",
-        //                     &b_additional_hit_scintillator_id);
+        output_tree->Branch("t5_all_hits_pos_x", &b_all_hits_pos_x);
+        output_tree->Branch("t5_all_hits_pos_y", &b_all_hits_pos_y);
+        output_tree->Branch("t5_all_hits_pos_x_error", &b_all_hits_pos_x_error);
+        output_tree->Branch("t5_all_hits_pos_y_error", &b_all_hits_pos_y_error);
+        output_tree->Branch("t5_all_hits_time", &b_all_hits_time);
+        output_tree->Branch("t5_all_hits_charge", &b_all_hits_charge);
+        // output_tree->Branch("t5_all_hits_scintillator_id",
+        //                     &b_all_hits_scintillator_id);
+        output_tree->Branch("t5_all_hits_is_in_time_window",
+                            &b_all_hits_is_in_time_window);
+        output_tree->Branch("t5_all_hits_is_in_bounds",
+                            &b_all_hits_is_in_bounds);
+
+        // y error calculation
+        auto sigma_y_error = T5_CONFIG::SCINT_BLOCK_HEIGHT / sqrt(12);
 
         for (const auto &event : all_T5_hits) {
             b_event_nr = event.event_nr;
-            b_T5HitMask = false;
-
-            if (!event.IsClean || !event.HasInTimeWindow)
-                b_T5HitMask = true;
+            b_T5_hit_bitmask = 0;
 
             b_n_main_particles = 0;
-            b_main_hit_charge = 0;
-            
-            b_main_hit_time = 0;
-            b_main_position_x = 0;
-            b_main_position_y = 0;
 
-            b_additional_hit_time->clear();
-            b_additional_hit_charge->clear();
-            b_additional_hit_pos_x->clear();
-            b_additional_hit_pos_y->clear();
-            b_main_hit_scintillator_id->clear();
-            b_additional_hit_scintillator_id->clear();
+            b_main_hit_charge = -9999;
+            b_main_hit_time = -9999;
+            b_main_position_x = -9999;
+            b_main_position_y = -9999;
+            b_main_position_x_error = -9999;
+            b_main_position_y_error = -9999;
+            // b_main_hit_scint_ID = -1;
+
+            b_all_hits_time->clear();
+            b_all_hits_charge->clear();
+            b_all_hits_pos_x->clear();
+            b_all_hits_pos_y->clear();
+            b_all_hits_pos_x_error->clear();
+            b_all_hits_pos_y_error->clear();
+            // b_all_hits_scintillator_id->clear();
+            b_all_hits_is_in_time_window->clear();
+            b_all_hits_is_in_bounds->clear();
 
             if (!event.HasValidHit) {
-                // output_tree->Fill();
-                continue;
+                b_T5_hit_bitmask |= (1 << 0);
             }
-            bool main_hit_happened = false;
+
+            const T5_hit *main_hit_candidate = nullptr;
             for (const auto &hit : event.T5_hits) {
+                b_all_hits_time->push_back(hit.raw_time);
+                b_all_hits_charge->push_back(hit.hit_charge);
+                b_all_hits_pos_x->push_back(hit.position_x);
+                b_all_hits_pos_y->push_back(hit.position_y);
+                b_all_hits_pos_x_error->push_back(hit.uncertainty);
+                b_all_hits_pos_y_error->push_back(sigma_y_error);
                 if (hit.quality == HitQuality::AccidentalCoincidence)
+                    b_all_hits_is_in_bounds->push_back(0);
+                else
+                    b_all_hits_is_in_bounds->push_back(1);
+                if (hit.is_in_time_window)
+                    b_all_hits_is_in_time_window->push_back(1);
+                else
+                    b_all_hits_is_in_time_window->push_back(0);
+
+                if (!hit.is_in_time_window)
                     continue;
-                if (hit.is_in_time_window && !main_hit_happened) {
-                    b_main_hit_time = hit.raw_time;
-                    b_main_hit_charge = hit.hit_charge;
-                    b_main_position_x = hit.position_x;
-                    b_main_position_y = hit.position_y;
-                    b_main_hit_scintillator_id->push_back(hit.scintillator_id);
-                    b_n_main_particles++;
-                    main_hit_happened = true;
-                } else if (hit.is_in_time_window) {
-                    b_n_main_particles++;
-                    b_additional_hit_time->push_back(hit.raw_time);
-                    b_additional_hit_charge->push_back(hit.hit_charge);
-                    b_additional_hit_pos_x->push_back(hit.position_x);
-                    b_additional_hit_pos_y->push_back(hit.position_y);
-                    b_additional_hit_scintillator_id->push_back(hit.scintillator_id);
-                }
 
-                else {
-                    b_additional_hit_time->push_back(hit.raw_time);
-                    b_additional_hit_charge->push_back(hit.hit_charge);
-                    b_additional_hit_pos_x->push_back(hit.position_x);
-                    b_additional_hit_pos_y->push_back(hit.position_y);
-                    b_additional_hit_scintillator_id->push_back(hit.scintillator_id);
-                }
+                b_n_main_particles++;
+                bool is_accidental =
+                    hit.quality == HitQuality::AccidentalCoincidence;
+                bool candidate_is_accidental =
+                    main_hit_candidate && (main_hit_candidate->quality ==
+                                           HitQuality::AccidentalCoincidence);
+                if (!main_hit_candidate ||
+                    (!is_accidental && candidate_is_accidental) ||
+                    (!is_accidental && !candidate_is_accidental &&
+                     hit.raw_time < main_hit_candidate->raw_time))
+                    main_hit_candidate = &hit;
             }
+            if (main_hit_candidate) {
+                bool is_accidental = main_hit_candidate->quality ==
+                                     HitQuality::AccidentalCoincidence;
 
-            // output_tree->Fill();
+                b_main_hit_time = main_hit_candidate->raw_time;
+                b_main_hit_charge = main_hit_candidate->hit_charge;
+                b_main_position_x = main_hit_candidate->position_x;
+                b_main_position_y = main_hit_candidate->position_y;
+                b_main_position_x_error = main_hit_candidate->uncertainty;
+                b_main_position_y_error = sigma_y_error;
+                if (is_accidental)
+                    b_T5_hit_bitmask |= (1 << 2);
+            }
+            if (b_n_main_particles > 1)
+                b_T5_hit_bitmask |= (1 << 1);
+            else if (b_n_main_particles == 0)
+                b_T5_hit_bitmask |= (1 << 0);
+
+            output_tree->Fill();
         }
-        // output_tree->Write();
+        output_tree->Write();
 
-        delete b_additional_hit_charge;
-        delete b_additional_hit_time;
-        delete b_additional_hit_pos_x;
-        delete b_additional_hit_pos_y;
-        delete b_main_hit_scintillator_id;
-        delete b_additional_hit_scintillator_id;
+        delete b_all_hits_charge;
+        delete b_all_hits_time;
+        delete b_all_hits_pos_x;
+        delete b_all_hits_pos_y;
+        delete b_all_hits_pos_x_error;
+        delete b_all_hits_pos_y_error;
+        // delete b_all_hits_scintillator_id;
+        delete b_all_hits_is_in_bounds;
+        delete b_all_hits_is_in_time_window;
 
-        write_mask_summary_csv((std::string(current_output_path.Data()) +
-                                    ".summary.csv"),
-                               run_number, filename.Data(), total_events,
-                               good_events, suspicious_main_window_events);
+        // write_mask_summary_csv(
+        //     (std::string(current_output_path.Data()) + "run.summary.csv"),
+        //     run_number, filename.Data(), total_events, good_events,
+        //     suspicious_main_window_events, n_unclean_events, n_empty_events,
+        //     n_main_OutOfBounds);
 
-        // output_file->Close();
+        output_file->Close();
     } // end loop over input files
 
     return 0;
