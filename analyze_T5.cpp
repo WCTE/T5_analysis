@@ -511,6 +511,12 @@ int main(int argc, char **argv) {
         // y error calculation
         auto sigma_y_error = T5_CONFIG::SCINT_BLOCK_HEIGHT / sqrt(12);
 
+        int n_hits_good = 0, n_hits_accidental = 0;
+        int n_multiple_main_hit_good_main_accidental_secondary_events = 0;
+
+        int n_events_bitmask_0 = 0, n_events_bitmask_1 = 0,
+            n_events_bitmask_2 = 0, n_events_bitmask_4 = 0, n_events_others = 0;
+
         for (const auto &event : all_T5_hits) {
             b_event_nr = event.event_nr;
             b_T5_hit_bitmask = 0;
@@ -535,10 +541,7 @@ int main(int argc, char **argv) {
             b_all_hits_is_in_time_window->clear();
             b_all_hits_is_in_bounds->clear();
 
-            if (!event.HasValidHit) {
-                b_T5_hit_bitmask |= (1 << 0);
-            }
-
+            bool had_accidental_main_hit_candidate = false;
             const T5_hit *main_hit_candidate = nullptr;
             for (const auto &hit : event.T5_hits) {
                 b_all_hits_time->push_back(hit.raw_time);
@@ -547,10 +550,13 @@ int main(int argc, char **argv) {
                 b_all_hits_pos_y->push_back(hit.position_y);
                 b_all_hits_pos_x_error->push_back(hit.uncertainty);
                 b_all_hits_pos_y_error->push_back(sigma_y_error);
-                if (hit.quality == HitQuality::AccidentalCoincidence)
+                if (hit.quality == HitQuality::AccidentalCoincidence) {
+                    n_hits_accidental++;
                     b_all_hits_is_in_bounds->push_back(0);
-                else
+                } else {
                     b_all_hits_is_in_bounds->push_back(1);
+                    n_hits_good++;
+                }
                 if (hit.is_in_time_window)
                     b_all_hits_is_in_time_window->push_back(1);
                 else
@@ -562,6 +568,8 @@ int main(int argc, char **argv) {
                 b_n_main_particles++;
                 bool is_accidental =
                     hit.quality == HitQuality::AccidentalCoincidence;
+                if (is_accidental)
+                    had_accidental_main_hit_candidate = true;
                 bool candidate_is_accidental =
                     main_hit_candidate && (main_hit_candidate->quality ==
                                            HitQuality::AccidentalCoincidence);
@@ -571,26 +579,59 @@ int main(int argc, char **argv) {
                      hit.raw_time < main_hit_candidate->raw_time))
                     main_hit_candidate = &hit;
             }
-            if (main_hit_candidate) {
-                bool is_accidental = main_hit_candidate->quality ==
-                                     HitQuality::AccidentalCoincidence;
-
-                b_main_hit_time = main_hit_candidate->raw_time;
-                b_main_hit_charge = main_hit_candidate->hit_charge;
-                b_main_position_x = main_hit_candidate->position_x;
-                b_main_position_y = main_hit_candidate->position_y;
-                b_main_position_x_error = main_hit_candidate->uncertainty;
-                b_main_position_y_error = sigma_y_error;
-                if (is_accidental)
-                    b_T5_hit_bitmask |= (1 << 2);
-            }
             if (b_n_main_particles > 1)
                 b_T5_hit_bitmask |= (1 << 1);
             else if (b_n_main_particles == 0)
                 b_T5_hit_bitmask |= (1 << 0);
+            if (main_hit_candidate) {
+                bool is_accidental = main_hit_candidate->quality ==
+                                     HitQuality::AccidentalCoincidence;
 
+                if (is_accidental) {
+                    b_T5_hit_bitmask |= (1 << 2);
+                } else if (b_T5_hit_bitmask == 0) {
+
+                    b_main_hit_time = main_hit_candidate->raw_time;
+                    b_main_hit_charge = main_hit_candidate->hit_charge;
+                    b_main_position_x = main_hit_candidate->position_x;
+                    b_main_position_y = main_hit_candidate->position_y;
+                    b_main_position_x_error = main_hit_candidate->uncertainty;
+                    b_main_position_y_error = sigma_y_error;
+                }
+            }
+
+            if (b_T5_hit_bitmask == 2 && had_accidental_main_hit_candidate)
+                n_multiple_main_hit_good_main_accidental_secondary_events++;
+            if (b_T5_hit_bitmask == 0)
+                n_events_bitmask_0++;
+            else if (b_T5_hit_bitmask == 1)
+                n_events_bitmask_1++;
+            else if (b_T5_hit_bitmask == 2)
+                n_events_bitmask_2++;
+            else if (b_T5_hit_bitmask == 4)
+                n_events_bitmask_4++;
+            else
+                n_events_others++;
             output_tree->Fill();
         }
+        cout << "Output diagnostics: " << endl;
+        cout << "\tnumber of good hits: " << n_hits_good << endl;
+        cout << "\tnumber of accidental hits: " << n_hits_accidental << endl;
+        cout << "\tnumber of events with a good main hit candidate, but an "
+                "accidental hit in the main time window: "
+             << n_multiple_main_hit_good_main_accidental_secondary_events
+             << endl
+             << "\tnumber of events with bitmask 0: " << n_events_bitmask_0
+             << endl
+             << "\tnumber of events with bitmask 1: " << n_events_bitmask_1
+             << endl
+             << "\tnumber of events with bitmask 2: " << n_events_bitmask_2
+             << endl
+             << "\tnumber of events with bitmask 4: " << n_events_bitmask_4
+             << endl
+             << "\tnumber of events with any other bitmask: " << n_events_others
+             << endl;
+
         output_tree->Write();
 
         delete b_all_hits_charge;
