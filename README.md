@@ -66,16 +66,29 @@ The output ROOT file contains one tree named `T5_Events` with the following bran
 | Branch name | Type | Description |
 | :--- | :---: | :--- |
 | `event_nr` | `Int_t` | Event number from the input tree |
-| `T5_hit_mask` | `Bool_t` | Flag indicating whether the event is considered problematic / not clean |
+| `T5_hit_bitmask` | `Int_t` | A bitmask  |
 | `T5_n_main_bunch_particles` | `Int_t` | Number of reconstructed main-bunch hits written for this event |
-| `T5_hit_time` | `Double_t` | Time of the primary reconstructed hit |
-| `T5_hit_charge` | `Double_t` | Charge of the primary reconstructed hit |
-| `T5_hit_pos_x` | `Double_t` | Reconstructed x position of the primary hit [mm] |
-| `T5_hit_pos_y` | `Double_t` | Reconstructed y position of the primary hit [mm] |
-| `T5_additional_hit_pos_x` | `vector<double>` | x positions of additional reconstructed hits |
-| `T5_additional_hit_pos_y` | `vector<double>` | y positions of additional reconstructed hits |
-| `T5_additional_hit_time` | `vector<double>` | Times of additional reconstructed hits |
-| `T5_additional_hit_charge` | `vector<double>` | Charges of additional reconstructed hits |
+| `T5_main_hit_time` | `Double_t` | Time of the primary reconstructed hit |
+| `T5_main_hit_charge` | `Double_t` | Charge of the primary reconstructed hit |
+| `T5_main_hit_pos_x` | `Double_t` | Reconstructed x position of the primary hit [mm] |
+| `T5_main_hit_pos_y` | `Double_t` | Reconstructed y position of the primary hit [mm] |
+| `T5_main_hit_pos_x_error` | `Double_t` | Uncertainty of the reconstructed x position of the primary hit [mm] |
+| `T5_main_hit_pos_y_error` | `Double_t` | Uncertainty of the reconstructed y position of the primary hit [mm] |
+| `T5_all_hits_pos_x` | `vector<double>` | x positions of all reconstructed hits in an event |
+| `T5_all_hits_pos_y` | `vector<double>` | y positions of all reconstructed hits in an event |
+| `T5_all_hits_pos_x_error` | `vector<double>` | x positions of all reconstructed hits in an event |
+| `T5_all_hits_pos_y_error` | `vector<double>` | y positions of all reconstructed hits in an event |
+| `T5_all_hits_time` | `vector<double>` | Times of all reconstructed hits in an event |
+| `T5_all_hits_charge` | `vector<double>` | Charges of all reconstructed hits in an event (sum of individual SiPM charges) |
+
+## T5 hit bitmask
+
+The output file has a T5 hit bitmask variable, that describes the error states that occured in the event. It can have the following values:
+
+- `0` -- The event is clean, has one main hit reconstructed in the T5 detector bounds (or is within uncertainty), there are no additional hits in the main bunch of particles
+- `1` -- The event is empty -- there was no hit in the main bunch of particles
+- `2` -- The event has multiple hits in the main time window -- a 'main' hit cannot be reliably chosen
+- `4` -- The event had a single hit in the main time window, but it was not successfully reconstructed within T5 bounds -- could indicate an SiPM time measurement error, or just an invalid hit.
 
 ## Notes
 
