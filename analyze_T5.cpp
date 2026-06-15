@@ -579,15 +579,15 @@ int main(int argc, char **argv) {
                      hit.raw_time < main_hit_candidate->raw_time))
                     main_hit_candidate = &hit;
             }
-            if (b_n_main_particles > 1)
-                b_T5_hit_bitmask |= (1 << 1);
-            else if (b_n_main_particles == 0)
+            if (b_n_main_particles == 0)
                 b_T5_hit_bitmask |= (1 << 0);
             if (main_hit_candidate) {
                 bool is_accidental = main_hit_candidate->quality ==
                                      HitQuality::AccidentalCoincidence;
 
-                if (is_accidental) {
+                if (b_n_main_particles > 1)
+                    b_T5_hit_bitmask |= (1 << 1);
+                else if (is_accidental) {
                     b_T5_hit_bitmask |= (1 << 2);
                 } else if (b_T5_hit_bitmask == 0) {
 
